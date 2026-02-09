@@ -3,7 +3,13 @@ import os
 import asyncpg
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
 from aiogram.filters import CommandStart, Command
 
 # ======================
@@ -33,13 +39,9 @@ async def init_db():
     async with db_pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS families (
-            id SERIAL PRIMARY KEY
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT
         );
-        """)
-
-        await conn.execute("""
-        ALTER TABLE families
-        ADD COLUMN IF NOT EXISTS owner_id BIGINT;
         """)
 
         await conn.execute("""
@@ -57,6 +59,21 @@ async def init_db():
             done BOOLEAN DEFAULT FALSE
         );
         """)
+
+
+# ======================
+# UI
+# ======================
+
+def main_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton("➕ Добавить задачу")],
+            [KeyboardButton("📋 Задачи")],
+            [KeyboardButton("👨‍👩‍👧‍👦 Пригласить")]
+        ],
+        resize_keyboard=True
+    )
 
 
 # ======================
@@ -92,12 +109,12 @@ async def ensure_family(user_id: int):
     return family_id
 
 
-async def add_to_family(user_id: int, family_id: int):
+async def add_user_to_family(user_id: int, family_id: int):
     async with db_pool.acquire() as conn:
         await conn.execute("""
         INSERT INTO family_members (user_id, family_id)
         VALUES ($1, $2)
-        ON CONFLICT (user_id) DO NOTHING
+        ON CONFLICT (user_id) DO UPDATE SET family_id = $2
         """, user_id, family_id)
 
 
@@ -109,40 +126,45 @@ async def add_to_family(user_id: int, family_id: int):
 async def start(message: Message):
     args = message.text.split()
 
-    # 👉 /start <family_id> — пришёл по invite
     if len(args) == 2 and args[1].isdigit():
-        family_id = int(args[1])
-        await add_to_family(message.from_user.id, family_id)
+        await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
 
     await ensure_family(message.from_user.id)
 
     await message.answer(
-        "👨‍👩‍👧 Семейный менеджер задач\n\n"
-        "✍️ Напиши задачу текстом\n"
-        "📋 Напиши «список» чтобы посмотреть задачи\n"
-        "➕ /invite — пригласить члена семьи"
+        "👨‍👩‍👧 Семейный менеджер задач\nВыбери действие 👇",
+        reply_markup=main_menu()
     )
 
 
+@dp.message(F.text == "👨‍👩‍👧‍👦 Пригласить")
 @dp.message(Command("invite"))
 async def invite(message: Message):
     family_id = await ensure_family(message.from_user.id)
-
     me = await bot.get_me()
+
     link = f"https://t.me/{me.username}?start={family_id}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="👨‍👩‍👧 Присоединиться к семье", url=link)
+        InlineKeyboardButton(
+            text="👨‍👩‍👧‍👦 Присоединиться к семье",
+            url=link
+        )
     ]])
 
     await message.answer(
-        "📨 Отправь эту ссылку члену семьи:",
+        "Отправь эту ссылку члену семьи 👇",
         reply_markup=keyboard
     )
 
 
-@dp.message(F.text.lower() == "список")
+@dp.message(F.text == "➕ Добавить задачу")
+async def ask_task(message: Message):
+    await message.answer("✍️ Напиши задачу текстом")
+
+
+@dp.message(F.text == "📋 Задачи")
 async def show_tasks(message: Message):
     family_id = await get_family_id(message.from_user.id)
 
@@ -153,27 +175,27 @@ async def show_tasks(message: Message):
         )
 
     if not rows:
-        await message.answer("🎉 Все задачи выполнены!")
+        await message.answer("🎉 Задач нет", reply_markup=main_menu())
         return
 
-    text = "📋 Список задач:\n\n"
-    keyboard = []
+    text = "📋 Задачи семьи:\n\n"
+    buttons = []
 
-    for row in rows:
-        status = "✅" if row["done"] else "⬜"
-        text += f"{status} {row['text']}\n"
+    for r in rows:
+        status = "✅" if r["done"] else "⬜"
+        text += f"{status} {r['text']}\n"
 
-        if not row["done"]:
-            keyboard.append([
+        if not r["done"]:
+            buttons.append([
                 InlineKeyboardButton(
-                    text=f"✔ {row['text']}",
-                    callback_data=f"done:{row['id']}"
+                    text=f"✔ {r['text']}",
+                    callback_data=f"done:{r['id']}"
                 )
             ])
 
     await message.answer(
         text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 
@@ -202,7 +224,7 @@ async def add_task(message: Message):
             family_id, message.text
         )
 
-    await message.answer("➕ Задача добавлена")
+    await message.answer("➕ Задача добавлена", reply_markup=main_menu())
 
 
 # ======================

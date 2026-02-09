@@ -1,135 +1,190 @@
 import asyncio
-import secrets
+import os
+import asyncpg
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
-from aiogram.client.default import DefaultBotProperties
 
-from config import BOT_TOKEN
-from db import init_db, get_pool
+# ======================
+# CONFIG
+# ======================
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-bot = Bot(
-    BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-)
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
+
+db_pool: asyncpg.Pool | None = None
+
+
+# ======================
+# DATABASE
+# ======================
+
+async def init_db():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS families (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT
+        );
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS family_members (
+            user_id BIGINT PRIMARY KEY,
+            family_id INTEGER REFERENCES families(id)
+        );
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id SERIAL PRIMARY KEY,
+            family_id INTEGER REFERENCES families(id),
+            text TEXT NOT NULL,
+            done BOOLEAN DEFAULT FALSE
+        );
+        """)
 
 
 # ======================
 # HELPERS
 # ======================
-async def get_or_create_user(user_id, name):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT family_id FROM users WHERE telegram_id=$1",
+
+async def get_family_id(user_id: int) -> int | None:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT family_id FROM family_members WHERE user_id=$1",
             user_id
         )
-        if user:
-            return user["family_id"]
+        return row["family_id"] if row else None
 
-        family_id = await conn.fetchval(
-            "INSERT INTO families DEFAULT VALUES RETURNING id"
-        )
 
-        await conn.execute(
-            "INSERT INTO users (telegram_id, name, family_id) VALUES ($1,$2,$3)",
-            user_id, name, family_id
-        )
+async def ensure_family(user_id: int) -> int:
+    family_id = await get_family_id(user_id)
+    if family_id:
         return family_id
 
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO families (owner_id) VALUES ($1) RETURNING id",
+            user_id
+        )
+        family_id = row["id"]
 
-async def notify_family(family_id, text, exclude=None):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        users = await conn.fetch(
-            "SELECT telegram_id FROM users WHERE family_id=$1",
+        await conn.execute(
+            "INSERT INTO family_members (user_id, family_id) VALUES ($1, $2)",
+            user_id, family_id
+        )
+
+    return family_id
+
+
+# ======================
+# HANDLERS
+# ======================
+
+@dp.message(CommandStart())
+async def start(message: Message):
+    await ensure_family(message.from_user.id)
+
+    await message.answer(
+        "👨‍👩‍👧 Семейный менеджер задач\n\n"
+        "✍️ Просто напиши задачу текстом:\n"
+        "Купить молоко\n\n"
+        "📋 Чтобы посмотреть список — напиши:\n"
+        "список"
+    )
+
+
+@dp.message(F.text.lower() == "список")
+async def show_tasks(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+    if not family_id:
+        await message.answer("Семья не найдена")
+        return
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, text, done FROM tasks WHERE family_id=$1 ORDER BY id",
             family_id
         )
 
-    for u in users:
-        if exclude and u["telegram_id"] == exclude:
-            continue
-        try:
-            await bot.send_message(u["telegram_id"], text)
-        except:
-            pass
+    if not rows:
+        await message.answer("🎉 Все задачи выполнены!")
+        return
 
+    text = "📋 Список задач:\n\n"
+    keyboard = []
 
-# ======================
-# MENU
-# ======================
-def menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton("➕ Добавить задачу")],
-            [KeyboardButton("🛒 Покупки")],
-            [KeyboardButton("👨‍👩‍👧‍👦 Пригласить")]
-        ],
-        resize_keyboard=True
-    )
+    for row in rows:
+        status = "✅" if row["done"] else "⬜"
+        text += f"{status} {row['text']}\n"
 
-
-# ======================
-# START
-# ======================
-@dp.message(CommandStart())
-async def start(message: Message):
-    family_id = await get_or_create_user(
-        message.from_user.id,
-        message.from_user.first_name
-    )
+        if not row["done"]:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"✔ {row['text']}",
+                    callback_data=f"done:{row['id']}"
+                )
+            ])
 
     await message.answer(
-        "👋 <b>Бот онлайн 24/7</b>\nВыбирай действие 👇",
-        reply_markup=menu()
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
 
-# ======================
-# ADD TASK
-# ======================
-@dp.message(lambda m: m.text == "➕ Добавить задачу")
-async def ask_task(message: Message):
-    await message.answer("✍️ Напиши задачу")
+@dp.callback_query(F.data.startswith("done:"))
+async def mark_done(callback):
+    task_id = int(callback.data.split(":")[1])
 
-
-@dp.message(lambda m: m.text and not m.text.startswith(("➕","🛒","👨")))
-async def add_task(message: Message):
-    pool = await get_pool()
-    family_id = await get_or_create_user(
-        message.from_user.id,
-        message.from_user.first_name
-    )
-
-    async with pool.acquire() as conn:
+    async with db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO tasks (family_id, text) VALUES ($1,$2)",
+            "UPDATE tasks SET done=TRUE WHERE id=$1",
+            task_id
+        )
+
+    await callback.answer("Готово ✅")
+    await callback.message.delete()
+    await show_tasks(callback.message)
+
+
+@dp.message(F.text)
+async def add_task(message: Message):
+    family_id = await ensure_family(message.from_user.id)
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO tasks (family_id, text) VALUES ($1, $2)",
             family_id, message.text
         )
 
-    await notify_family(
-        family_id,
-        f"➕ <b>{message.from_user.first_name}</b> добавил задачу:\n{message.text}",
-        exclude=message.from_user.id
-    )
+    await message.answer("➕ Задача добавлена")
 
 
 # ======================
-# RUN
+# MAIN
 # ======================
+
 async def main():
+    # 🔥 КЛЮЧЕВАЯ СТРОКА — УБИРАЕТ TelegramConflict
+    await bot.delete_webhook(drop_pending_updates=True)
+
     await init_db()
     print("🤖 Bot started with PostgreSQL")
+
     await dp.start_polling(bot)
 
 

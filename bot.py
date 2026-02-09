@@ -4,7 +4,7 @@ import asyncpg
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 
 # ======================
 # CONFIG
@@ -13,11 +13,8 @@ from aiogram.filters import CommandStart
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set")
-
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set")
+if not BOT_TOKEN or not DATABASE_URL:
+    raise RuntimeError("ENV variables not set")
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -34,20 +31,17 @@ async def init_db():
     db_pool = await asyncpg.create_pool(DATABASE_URL)
 
     async with db_pool.acquire() as conn:
-        # families
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS families (
             id SERIAL PRIMARY KEY
         );
         """)
 
-        # 🔥 МИГРАЦИЯ: добавляем owner_id, если его нет
         await conn.execute("""
         ALTER TABLE families
         ADD COLUMN IF NOT EXISTS owner_id BIGINT;
         """)
 
-        # members
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS family_members (
             user_id BIGINT PRIMARY KEY,
@@ -55,7 +49,6 @@ async def init_db():
         );
         """)
 
-        # tasks
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id SERIAL PRIMARY KEY,
@@ -89,7 +82,6 @@ async def ensure_family(user_id: int):
             "INSERT INTO families (owner_id) VALUES ($1) RETURNING id",
             user_id
         )
-
         family_id = row["id"]
 
         await conn.execute(
@@ -100,20 +92,53 @@ async def ensure_family(user_id: int):
     return family_id
 
 
+async def add_to_family(user_id: int, family_id: int):
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+        INSERT INTO family_members (user_id, family_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) DO NOTHING
+        """, user_id, family_id)
+
+
 # ======================
 # HANDLERS
 # ======================
 
 @dp.message(CommandStart())
 async def start(message: Message):
+    args = message.text.split()
+
+    # 👉 /start <family_id> — пришёл по invite
+    if len(args) == 2 and args[1].isdigit():
+        family_id = int(args[1])
+        await add_to_family(message.from_user.id, family_id)
+        await message.answer("🎉 Ты присоединился к семье!")
+
     await ensure_family(message.from_user.id)
 
     await message.answer(
         "👨‍👩‍👧 Семейный менеджер задач\n\n"
-        "✍️ Просто напиши задачу текстом:\n"
-        "Купить молоко\n\n"
-        "📋 Чтобы посмотреть список — напиши:\n"
-        "список"
+        "✍️ Напиши задачу текстом\n"
+        "📋 Напиши «список» чтобы посмотреть задачи\n"
+        "➕ /invite — пригласить члена семьи"
+    )
+
+
+@dp.message(Command("invite"))
+async def invite(message: Message):
+    family_id = await ensure_family(message.from_user.id)
+
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start={family_id}"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="👨‍👩‍👧 Присоединиться к семье", url=link)
+    ]])
+
+    await message.answer(
+        "📨 Отправь эту ссылку члену семьи:",
+        reply_markup=keyboard
     )
 
 
@@ -185,12 +210,9 @@ async def add_task(message: Message):
 # ======================
 
 async def main():
-    # 🔥 сброс конфликтов Telegram
     await bot.delete_webhook(drop_pending_updates=True)
-
     await init_db()
     print("🤖 Bot started with PostgreSQL")
-
     await dp.start_polling(bot)
 
 

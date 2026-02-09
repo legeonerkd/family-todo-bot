@@ -34,13 +34,20 @@ async def init_db():
     db_pool = await asyncpg.create_pool(DATABASE_URL)
 
     async with db_pool.acquire() as conn:
+        # families
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS families (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT
+            id SERIAL PRIMARY KEY
         );
         """)
 
+        # 🔥 МИГРАЦИЯ: добавляем owner_id, если его нет
+        await conn.execute("""
+        ALTER TABLE families
+        ADD COLUMN IF NOT EXISTS owner_id BIGINT;
+        """)
+
+        # members
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS family_members (
             user_id BIGINT PRIMARY KEY,
@@ -48,6 +55,7 @@ async def init_db():
         );
         """)
 
+        # tasks
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id SERIAL PRIMARY KEY,
@@ -62,7 +70,7 @@ async def init_db():
 # HELPERS
 # ======================
 
-async def get_family_id(user_id: int) -> int | None:
+async def get_family_id(user_id: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT family_id FROM family_members WHERE user_id=$1",
@@ -71,7 +79,7 @@ async def get_family_id(user_id: int) -> int | None:
         return row["family_id"] if row else None
 
 
-async def ensure_family(user_id: int) -> int:
+async def ensure_family(user_id: int):
     family_id = await get_family_id(user_id)
     if family_id:
         return family_id
@@ -81,6 +89,7 @@ async def ensure_family(user_id: int) -> int:
             "INSERT INTO families (owner_id) VALUES ($1) RETURNING id",
             user_id
         )
+
         family_id = row["id"]
 
         await conn.execute(
@@ -111,9 +120,6 @@ async def start(message: Message):
 @dp.message(F.text.lower() == "список")
 async def show_tasks(message: Message):
     family_id = await get_family_id(message.from_user.id)
-    if not family_id:
-        await message.answer("Семья не найдена")
-        return
 
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
@@ -179,7 +185,7 @@ async def add_task(message: Message):
 # ======================
 
 async def main():
-    # 🔥 КЛЮЧЕВАЯ СТРОКА — УБИРАЕТ TelegramConflict
+    # 🔥 сброс конфликтов Telegram
     await bot.delete_webhook(drop_pending_updates=True)
 
     await init_db()

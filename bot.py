@@ -8,7 +8,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton
 )
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -55,9 +55,10 @@ def main_menu():
                 KeyboardButton(text="🛒 Покупки")
             ],
             [
-                KeyboardButton(text="⚙️ Уведомления"),
-                KeyboardButton(text="👨‍👩‍👧‍👦 Пригласить")
-            ]
+                KeyboardButton(text="👨‍👩‍👧‍👦 Семья"),
+                KeyboardButton(text="⚙️ Уведомления")
+            ],
+            [KeyboardButton(text="👨‍👩‍👧‍👦 Пригласить")]
         ],
         resize_keyboard=True
     )
@@ -202,6 +203,34 @@ async def invite(message: Message):
     ])
 
     await message.answer("Отправь ссылку 👇", reply_markup=kb)
+
+# ======================
+# FAMILY LIST
+# ======================
+
+@dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
+async def show_family(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT user_id FROM family_members WHERE family_id=$1",
+            family_id
+        )
+
+    lines = ["👨‍👩‍👧‍👦 В семье сейчас:\n"]
+
+    for u in users:
+        try:
+            chat = await bot.get_chat(u["user_id"])
+            name = chat.first_name or "Без имени"
+        except:
+            name = "Неизвестный пользователь"
+        lines.append(f"• {name}")
+
+    lines.append(f"\nВсего: {len(users)}")
+
+    await message.answer("\n".join(lines), reply_markup=main_menu())
 
 # ======================
 # ADD FLOW
@@ -415,7 +444,7 @@ async def notif_change(callback: CallbackQuery):
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
-    print("🤖 Bot started — FULL MVP with HOME")
+    print("🤖 Bot started — FULL MVP with HOME + FAMILY")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

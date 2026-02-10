@@ -1,7 +1,12 @@
 import asyncio
 import os
+
+from dotenv import load_dotenv
+load_dotenv()
+
 import asyncpg
 from datetime import datetime
+
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -84,12 +89,15 @@ async def ensure_family(user_id: int):
 
 async def add_user_to_family(user_id: int, family_id: int):
     async with db_pool.acquire() as conn:
-        await conn.execute("""
-        INSERT INTO family_members (user_id, family_id, role)
-        VALUES ($1,$2,'child')
-        ON CONFLICT (user_id)
-        DO UPDATE SET family_id=$2
-        """, user_id, family_id)
+        await conn.execute(
+            """
+            INSERT INTO family_members (user_id, family_id, role)
+            VALUES ($1,$2,'child')
+            ON CONFLICT (user_id)
+            DO UPDATE SET family_id=$2
+            """,
+            user_id, family_id
+        )
 
 # =====================================================
 # HELPERS: NOTIFICATIONS
@@ -123,6 +131,18 @@ async def notify_family(family_id: int, text: str, author_id: int, level="all"):
             pass
 
 # =====================================================
+# HELPERS: ACTIVITY LOG
+# =====================================================
+
+async def log_action(family_id: int, user_id: int, action: str):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO activity_log (family_id, user_id, action) "
+            "VALUES ($1,$2,$3)",
+            family_id, user_id, action
+        )
+
+# =====================================================
 # UI
 # =====================================================
 
@@ -136,6 +156,7 @@ def main_menu(is_parent: bool):
         [KeyboardButton(text="👨‍👩‍👧‍👦 Семья")]
     ]
     if is_parent:
+        rows.append([KeyboardButton(text="📜 История")])
         rows.append([KeyboardButton(text="👨‍👩‍👧‍👦 Пригласить")])
         rows.append([KeyboardButton(text="⚙️ Уведомления")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
@@ -147,13 +168,9 @@ def confirm_keyboard():
     ]])
 
 def shopping_actions(is_parent: bool):
-    rows = [
-        [InlineKeyboardButton(text="✅ Отметить купленным", callback_data="shop:done")]
-    ]
+    rows = [[InlineKeyboardButton(text="✅ Отметить купленным", callback_data="shop:done")]]
     if is_parent:
-        rows.append(
-            [InlineKeyboardButton(text="🧹 Очистить купленные", callback_data="shop:clear")]
-        )
+        rows.append([InlineKeyboardButton(text="🧹 Очистить купленные", callback_data="shop:clear")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def notification_menu():
@@ -169,11 +186,10 @@ def notification_menu():
 
 async def home_text(family_id: int):
     async with db_pool.acquire() as conn:
-        t_total = await conn.fetchval(
-            "SELECT COUNT(*) FROM tasks WHERE family_id=$1", family_id
-        )
+        t_total = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE family_id=$1", family_id)
         t_active = await conn.fetchval(
-            "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE", family_id
+            "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE",
+            family_id
         )
         s_active = await conn.fetchval(
             "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
@@ -190,77 +206,10 @@ async def home_text(family_id: int):
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
-    await message.answer(
-        await home_text(family_id),
-        reply_markup=main_menu(parent)
-    )
+    await message.answer(await home_text(family_id), reply_markup=main_menu(parent))
 
 # =====================================================
-# DAILY DIGEST (PARENTS ONLY)
-# =====================================================
-
-async def build_daily_digest(family_id: int) -> str:
-    async with db_pool.acquire() as conn:
-        tasks_total = await conn.fetchval(
-            "SELECT COUNT(*) FROM tasks WHERE family_id=$1",
-            family_id
-        )
-        tasks_done = await conn.fetchval(
-            "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=TRUE",
-            family_id
-        )
-        shopping_active = await conn.fetchval(
-            "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
-            family_id
-        )
-
-    return (
-        "📊 Итоги дня\n\n"
-        "📋 Задачи\n"
-        f"• Всего: {tasks_total}\n"
-        f"• Выполнено: {tasks_done}\n"
-        f"• Осталось: {tasks_total - tasks_done}\n\n"
-        "🛒 Покупки\n"
-        f"• В списке: {shopping_active}\n\n"
-        "Хорошего вечера 🌙"
-    )
-
-async def daily_digest_loop():
-    await asyncio.sleep(10)
-
-    while True:
-        now = datetime.now().strftime("%H:%M")
-
-        async with db_pool.acquire() as conn:
-            families = await conn.fetch(
-                "SELECT id FROM families WHERE digest_time=$1",
-                now
-            )
-
-        for fam in families:
-            family_id = fam["id"]
-            text = await build_daily_digest(family_id)
-
-            async with db_pool.acquire() as conn:
-                parents = await conn.fetch(
-                    "SELECT user_id FROM family_members "
-                    "WHERE family_id=$1 AND role='parent'",
-                    family_id
-                )
-
-            for p in parents:
-                mode = await get_notif_mode(p["user_id"])
-                if mode == "off":
-                    continue
-                try:
-                    await bot.send_message(p["user_id"], text)
-                except:
-                    pass
-
-        await asyncio.sleep(60)
-
-# =====================================================
-# START / INVITE
+# HANDLERS
 # =====================================================
 
 @dp.message(CommandStart())
@@ -271,52 +220,6 @@ async def start(message: Message, state: FSMContext):
         await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
     await show_home(message)
-
-@dp.message(F.text == "👨‍👩‍👧‍👦 Пригласить")
-async def invite(message: Message):
-    if not await is_parent(message.from_user.id):
-        return
-    family_id = await ensure_family(message.from_user.id)
-    me = await bot.get_me()
-    link = f"https://t.me/{me.username}?start={family_id}"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Присоединиться к семье", url=link)]
-    ])
-    await message.answer("Отправь ссылку 👇", reply_markup=kb)
-
-# =====================================================
-# FAMILY LIST
-# =====================================================
-
-@dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
-async def show_family(message: Message):
-    family_id = await ensure_family(message.from_user.id)
-
-    async with db_pool.acquire() as conn:
-        members = await conn.fetch(
-            "SELECT user_id, role FROM family_members WHERE family_id=$1",
-            family_id
-        )
-
-    lines = ["👨‍👩‍👧‍👦 Семья:\n"]
-    for m in members:
-        try:
-            chat = await bot.get_chat(m["user_id"])
-            name = chat.first_name or "Без имени"
-        except:
-            name = "Неизвестный"
-
-        role = "👑 Родитель" if m["role"] == "parent" else "👶 Ребёнок"
-        lines.append(f"• {name} — {role}")
-
-    await message.answer(
-        "\n".join(lines),
-        reply_markup=main_menu(await is_parent(message.from_user.id))
-    )
-
-# =====================================================
-# ADD FLOW
-# =====================================================
 
 @dp.message(F.text == "➕ Добавить")
 async def add_any(message: Message, state: FSMContext):
@@ -334,7 +237,16 @@ async def choose_type(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("confirm:"))
 async def confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    text = data["text"]
+    text = data.get("text")
+
+    if not text:
+        await callback.answer(
+            "❗ Действие устарело. Нажми «➕ Добавить» заново",
+            show_alert=True
+        )
+        await state.clear()
+        return
+
     family_id = await ensure_family(callback.from_user.id)
 
     async with db_pool.acquire() as conn:
@@ -366,191 +278,6 @@ async def confirm(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await show_home(callback.message)
 
-# =====================================================
-# TASKS
-# =====================================================
-
-@dp.message(F.text == "📋 Задачи")
-async def tasks(message: Message):
-    family_id = await get_family_id(message.from_user.id)
-
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, text, done FROM tasks WHERE family_id=$1",
-            family_id
-        )
-
-    if not rows:
-        await show_home(message)
-        return
-
-    text = "📋 Задачи:\n\n"
-    kb = []
-
-    for r in rows:
-        text += f"{'✅' if r['done'] else '⬜'} {r['text']}\n"
-        if not r["done"]:
-            kb.append([
-                InlineKeyboardButton(
-                    text=f"✔ {r['text']}",
-                    callback_data=f"taskdone:{r['id']}"
-                )
-            ])
-
-    await message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-    )
-
-@dp.callback_query(F.data.startswith("taskdone:"))
-async def task_done(callback: CallbackQuery):
-    task_id = int(callback.data.split(":")[1])
-
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "UPDATE tasks SET done=TRUE WHERE id=$1 "
-            "RETURNING text, family_id",
-            task_id
-        )
-
-    await notify_family(
-        row["family_id"],
-        f"✅ Задача выполнена:\n{row['text']}",
-        callback.from_user.id,
-        "important"
-    )
-
-    await callback.message.delete()
-    await show_home(callback.message)
-
-# =====================================================
-# SHOPPING
-# =====================================================
-
-@dp.message(F.text == "🛒 Покупки")
-async def shopping(message: Message):
-    family_id = await get_family_id(message.from_user.id)
-    parent = await is_parent(message.from_user.id)
-
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, text, is_bought FROM shopping WHERE family_id=$1",
-            family_id
-        )
-
-    text = "🛒 Покупки:\n\n"
-    for r in rows:
-        text += f"{'✅' if r['is_bought'] else '⬜'} {r['text']}\n"
-
-    await message.answer(text, reply_markup=shopping_actions(parent))
-
-@dp.callback_query(F.data == "shop:done")
-async def choose_shop(callback: CallbackQuery):
-    family_id = await get_family_id(callback.from_user.id)
-
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, text FROM shopping "
-            "WHERE family_id=$1 AND is_bought=FALSE",
-            family_id
-        )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=r["text"], callback_data=f"bought:{r['id']}")]
-        for r in rows
-    ])
-
-    await callback.message.answer("Что купили?", reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("bought:"))
-async def bought(callback: CallbackQuery):
-    item_id = int(callback.data.split(":")[1])
-
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "UPDATE shopping SET is_bought=TRUE WHERE id=$1 "
-            "RETURNING text, family_id",
-            item_id
-        )
-
-    await notify_family(
-        row["family_id"],
-        f"🛒 Куплено:\n{row['text']}",
-        callback.from_user.id
-    )
-
-    await callback.message.delete()
-    await show_home(callback.message)
-
-@dp.callback_query(F.data == "shop:clear")
-async def clear_shop(callback: CallbackQuery):
-    if not await is_parent(callback.from_user.id):
-        return
-
-    family_id = await get_family_id(callback.from_user.id)
-
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM shopping "
-            "WHERE family_id=$1 AND is_bought=TRUE",
-            family_id
-        )
-
-    await callback.message.delete()
-    await show_home(callback.message)
-
-# =====================================================
-# NOTIFICATION SETTINGS
-# =====================================================
-
-@dp.message(F.text == "⚙️ Уведомления")
-async def notif_settings(message: Message):
-    if not await is_parent(message.from_user.id):
-        return
-    await message.answer(
-        "Настройки уведомлений",
-        reply_markup=notification_menu()
-    )
-
-@dp.callback_query(F.data.startswith("notif:"))
-async def notif_change(callback: CallbackQuery):
-    if not await is_parent(callback.from_user.id):
-        return
-
-    mode = callback.data.split(":")[1]
-
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO user_settings (user_id, notifications) "
-            "VALUES ($1,$2) "
-            "ON CONFLICT (user_id) "
-            "DO UPDATE SET notifications=$2",
-            callback.from_user.id, mode
-        )
-
-    await callback.answer("Сохранено 👍", show_alert=True)
-    await callback.message.delete()
-    await show_home(callback.message)
-
-# =====================================================
-# MAIN
-# =====================================================
-
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await init_db()
-
-    asyncio.create_task(daily_digest_loop())
-
-    print("🤖 Bot started — FULL MVP + DAILY DIGEST (parents only)")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-# =====================================================
-# ACTIVITY HISTORY
-# =====================================================
-
 @dp.message(F.text == "📜 История")
 async def show_history(message: Message):
     if not await is_parent(message.from_user.id):
@@ -560,11 +287,8 @@ async def show_history(message: Message):
 
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT action, created_at "
-            "FROM activity_log "
-            "WHERE family_id=$1 "
-            "ORDER BY created_at DESC "
-            "LIMIT 20",
+            "SELECT action FROM activity_log "
+            "WHERE family_id=$1 ORDER BY created_at DESC LIMIT 20",
             family_id
         )
 
@@ -577,3 +301,16 @@ async def show_history(message: Message):
         text += f"• {r['action']}\n"
 
     await message.answer(text)
+
+# =====================================================
+# MAIN
+# =====================================================
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await init_db()
+    print("🤖 Bot started — CLEAN STABLE VERSION")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())

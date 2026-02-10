@@ -1,6 +1,7 @@
 import asyncio
 import os
 import asyncpg
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -75,7 +76,8 @@ async def ensure_family(user_id: int):
             user_id
         )
         await conn.execute(
-            "INSERT INTO family_members (user_id, family_id, role) VALUES ($1,$2,'parent')",
+            "INSERT INTO family_members (user_id, family_id, role) "
+            "VALUES ($1,$2,'parent')",
             user_id, fam["id"]
         )
         return fam["id"]
@@ -104,7 +106,8 @@ async def get_notif_mode(user_id: int):
 async def notify_family(family_id: int, text: str, author_id: int, level="all"):
     async with db_pool.acquire() as conn:
         users = await conn.fetch(
-            "SELECT user_id FROM family_members WHERE family_id=$1 AND user_id!=$2",
+            "SELECT user_id FROM family_members "
+            "WHERE family_id=$1 AND user_id!=$2",
             family_id, author_id
         )
 
@@ -173,7 +176,8 @@ async def home_text(family_id: int):
             "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE", family_id
         )
         s_active = await conn.fetchval(
-            "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE", family_id
+            "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
+            family_id
         )
 
     return (
@@ -190,6 +194,70 @@ async def show_home(message: Message):
         await home_text(family_id),
         reply_markup=main_menu(parent)
     )
+
+# =====================================================
+# DAILY DIGEST (PARENTS ONLY)
+# =====================================================
+
+async def build_daily_digest(family_id: int) -> str:
+    async with db_pool.acquire() as conn:
+        tasks_total = await conn.fetchval(
+            "SELECT COUNT(*) FROM tasks WHERE family_id=$1",
+            family_id
+        )
+        tasks_done = await conn.fetchval(
+            "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=TRUE",
+            family_id
+        )
+        shopping_active = await conn.fetchval(
+            "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
+            family_id
+        )
+
+    return (
+        "📊 Итоги дня\n\n"
+        "📋 Задачи\n"
+        f"• Всего: {tasks_total}\n"
+        f"• Выполнено: {tasks_done}\n"
+        f"• Осталось: {tasks_total - tasks_done}\n\n"
+        "🛒 Покупки\n"
+        f"• В списке: {shopping_active}\n\n"
+        "Хорошего вечера 🌙"
+    )
+
+async def daily_digest_loop():
+    await asyncio.sleep(10)
+
+    while True:
+        now = datetime.now().strftime("%H:%M")
+
+        async with db_pool.acquire() as conn:
+            families = await conn.fetch(
+                "SELECT id FROM families WHERE digest_time=$1",
+                now
+            )
+
+        for fam in families:
+            family_id = fam["id"]
+            text = await build_daily_digest(family_id)
+
+            async with db_pool.acquire() as conn:
+                parents = await conn.fetch(
+                    "SELECT user_id FROM family_members "
+                    "WHERE family_id=$1 AND role='parent'",
+                    family_id
+                )
+
+            for p in parents:
+                mode = await get_notif_mode(p["user_id"])
+                if mode == "off":
+                    continue
+                try:
+                    await bot.send_message(p["user_id"], text)
+                except:
+                    pass
+
+        await asyncio.sleep(60)
 
 # =====================================================
 # START / INVITE
@@ -223,6 +291,7 @@ async def invite(message: Message):
 @dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
 async def show_family(message: Message):
     family_id = await ensure_family(message.from_user.id)
+
     async with db_pool.acquire() as conn:
         members = await conn.fetch(
             "SELECT user_id, role FROM family_members WHERE family_id=$1",
@@ -236,10 +305,14 @@ async def show_family(message: Message):
             name = chat.first_name or "Без имени"
         except:
             name = "Неизвестный"
+
         role = "👑 Родитель" if m["role"] == "parent" else "👶 Ребёнок"
         lines.append(f"• {name} — {role}")
 
-    await message.answer("\n".join(lines), reply_markup=main_menu(await is_parent(message.from_user.id)))
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=main_menu(await is_parent(message.from_user.id))
+    )
 
 # =====================================================
 # ADD FLOW
@@ -298,6 +371,7 @@ async def confirm(callback: CallbackQuery, state: FSMContext):
 @dp.message(F.text == "📋 Задачи")
 async def tasks(message: Message):
     family_id = await get_family_id(message.from_user.id)
+
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, text, done FROM tasks WHERE family_id=$1",
@@ -310,6 +384,7 @@ async def tasks(message: Message):
 
     text = "📋 Задачи:\n\n"
     kb = []
+
     for r in rows:
         text += f"{'✅' if r['done'] else '⬜'} {r['text']}\n"
         if not r["done"]:
@@ -328,9 +403,11 @@ async def tasks(message: Message):
 @dp.callback_query(F.data.startswith("taskdone:"))
 async def task_done(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
+
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "UPDATE tasks SET done=TRUE WHERE id=$1 RETURNING text, family_id",
+            "UPDATE tasks SET done=TRUE WHERE id=$1 "
+            "RETURNING text, family_id",
             task_id
         )
 
@@ -368,9 +445,11 @@ async def shopping(message: Message):
 @dp.callback_query(F.data == "shop:done")
 async def choose_shop(callback: CallbackQuery):
     family_id = await get_family_id(callback.from_user.id)
+
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, text FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
+            "SELECT id, text FROM shopping "
+            "WHERE family_id=$1 AND is_bought=FALSE",
             family_id
         )
 
@@ -384,9 +463,11 @@ async def choose_shop(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("bought:"))
 async def bought(callback: CallbackQuery):
     item_id = int(callback.data.split(":")[1])
+
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "UPDATE shopping SET is_bought=TRUE WHERE id=$1 RETURNING text, family_id",
+            "UPDATE shopping SET is_bought=TRUE WHERE id=$1 "
+            "RETURNING text, family_id",
             item_id
         )
 
@@ -403,12 +484,16 @@ async def bought(callback: CallbackQuery):
 async def clear_shop(callback: CallbackQuery):
     if not await is_parent(callback.from_user.id):
         return
+
     family_id = await get_family_id(callback.from_user.id)
+
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "DELETE FROM shopping WHERE family_id=$1 AND is_bought=TRUE",
+            "DELETE FROM shopping "
+            "WHERE family_id=$1 AND is_bought=TRUE",
             family_id
         )
+
     await callback.message.delete()
     await show_home(callback.message)
 
@@ -420,19 +505,26 @@ async def clear_shop(callback: CallbackQuery):
 async def notif_settings(message: Message):
     if not await is_parent(message.from_user.id):
         return
-    await message.answer("Настройки уведомлений", reply_markup=notification_menu())
+    await message.answer(
+        "Настройки уведомлений",
+        reply_markup=notification_menu()
+    )
 
 @dp.callback_query(F.data.startswith("notif:"))
 async def notif_change(callback: CallbackQuery):
     if not await is_parent(callback.from_user.id):
         return
+
     mode = callback.data.split(":")[1]
+
     async with db_pool.acquire() as conn:
-        await conn.execute("""
-        INSERT INTO user_settings (user_id, notifications)
-        VALUES ($1,$2)
-        ON CONFLICT (user_id) DO UPDATE SET notifications=$2
-        """, callback.from_user.id, mode)
+        await conn.execute(
+            "INSERT INTO user_settings (user_id, notifications) "
+            "VALUES ($1,$2) "
+            "ON CONFLICT (user_id) "
+            "DO UPDATE SET notifications=$2",
+            callback.from_user.id, mode
+        )
 
     await callback.answer("Сохранено 👍", show_alert=True)
     await callback.message.delete()
@@ -445,7 +537,10 @@ async def notif_change(callback: CallbackQuery):
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
-    print("🤖 Bot started — FULL BASELINE MVP WITH ROLES")
+
+    asyncio.create_task(daily_digest_loop())
+
+    print("🤖 Bot started — FULL MVP + DAILY DIGEST (parents only)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

@@ -343,6 +343,7 @@ async def confirm(callback: CallbackQuery, state: FSMContext):
                 "INSERT INTO tasks (family_id, text) VALUES ($1,$2)",
                 family_id, text
             )
+            await log_action(family_id, callback.from_user.id, f"добавил задачу «{text}»")
             await notify_family(
                 family_id,
                 f"🆕 Новая задача:\n{text}",
@@ -354,6 +355,7 @@ async def confirm(callback: CallbackQuery, state: FSMContext):
                 "INSERT INTO shopping (family_id, text) VALUES ($1,$2)",
                 family_id, text
             )
+            await log_action(family_id, callback.from_user.id, f"добавил покупку «{text}»")
             await notify_family(
                 family_id,
                 f"🛒 Добавлено в покупки:\n{text}",
@@ -545,3 +547,33 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+# =====================================================
+# ACTIVITY HISTORY
+# =====================================================
+
+@dp.message(F.text == "📜 История")
+async def show_history(message: Message):
+    if not await is_parent(message.from_user.id):
+        return
+
+    family_id = await get_family_id(message.from_user.id)
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT action, created_at "
+            "FROM activity_log "
+            "WHERE family_id=$1 "
+            "ORDER BY created_at DESC "
+            "LIMIT 20",
+            family_id
+        )
+
+    if not rows:
+        await message.answer("История пока пуста")
+        return
+
+    text = "📜 Последние действия:\n\n"
+    for r in rows:
+        text += f"• {r['action']}\n"
+
+    await message.answer(text)

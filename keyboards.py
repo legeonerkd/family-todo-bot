@@ -1,9 +1,18 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def task_keyboard(task_id):
-    return InlineKeyboardMarkup(inline_keyboard=[
+main_kb = ReplyKeyboardMarkup(
+    keyboard=[
         [
-            InlineKeyboardButton(text="✅ Готово", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete:{task_id}")
+            KeyboardButton(text="📋 Задачи"),
+            KeyboardButton(text="🛒 Покупки"),
+        ],
+        [
+            KeyboardButton(text="➕ Добавить задачу"),
+            KeyboardButton(text="➕ Добавить покупку"),
+        ],
+        [
+            KeyboardButton(text="👨‍👩‍👧‍👦 Семья"),
         ]
-    ])
+    ],
+    resize_keyboard=True
+)

@@ -1,66 +1,63 @@
 import asyncpg
-import os
+from config import DATABASE_URL
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-_pool = None
-
-
-async def get_pool():
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL)
-    return _pool
+db_pool: asyncpg.Pool | None = None
 
 
 async def init_db():
-    pool = await get_pool()
-    async with pool.acquire() as conn:
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+
+    async with db_pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS families (
-            id SERIAL PRIMARY KEY
+            id SERIAL PRIMARY KEY,
+            title TEXT DEFAULT 'Наша семья'
         );
-        """)
 
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            telegram_id BIGINT PRIMARY KEY,
-            name TEXT,
-            family_id INTEGER REFERENCES families(id)
+        CREATE TABLE IF NOT EXISTS family_members (
+            user_id BIGINT PRIMARY KEY,
+            family_id INTEGER REFERENCES families(id),
+            role TEXT CHECK (role IN ('parent','child'))
         );
-        """)
 
-        await conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id SERIAL PRIMARY KEY,
             family_id INTEGER REFERENCES families(id),
             text TEXT,
-            is_done BOOLEAN DEFAULT FALSE
+            done BOOLEAN DEFAULT FALSE
         );
-        """)
 
-        await conn.execute("""
         CREATE TABLE IF NOT EXISTS shopping (
             id SERIAL PRIMARY KEY,
             family_id INTEGER REFERENCES families(id),
             text TEXT,
             is_bought BOOLEAN DEFAULT FALSE
         );
-        """)
 
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS invites (
-            code TEXT PRIMARY KEY,
-            family_id INTEGER REFERENCES families(id)
-        );
-        """)
-
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS pinned_messages (
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id SERIAL PRIMARY KEY,
             family_id INTEGER,
-            chat_id BIGINT,
-            message_type TEXT,
-            message_id BIGINT,
-            PRIMARY KEY (family_id, message_type)
+            user_id BIGINT,
+            action TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
         );
         """)
+
+
+async def get_family_id(user_id: int) -> int | None:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT family_id FROM family_members WHERE user_id=$1",
+            user_id
+        )
+        return row["family_id"] if row else None
+
+
+async def is_parent(user_id: int) -> bool:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT role FROM family_members WHERE user_id=$1",
+            user_id
+        )
+        return row and row["role"] == "parent"

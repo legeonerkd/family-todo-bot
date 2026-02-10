@@ -5,8 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncpg
-from datetime import datetime
-
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -39,6 +37,7 @@ db_pool: asyncpg.Pool | None = None
 
 class UserState(StatesGroup):
     confirm_type = State()
+    rename_family = State()
 
 # =====================================================
 # DB INIT
@@ -77,7 +76,7 @@ async def ensure_family(user_id: int):
             return m["family_id"]
 
         fam = await conn.fetchrow(
-            "INSERT INTO families (owner_id) VALUES ($1) RETURNING id",
+            "INSERT INTO families (title, owner_id) VALUES ('Наша семья', $1) RETURNING id",
             user_id
         )
         await conn.execute(
@@ -156,9 +155,11 @@ def main_menu(is_parent: bool):
         [KeyboardButton(text="👨‍👩‍👧‍👦 Семья")]
     ]
     if is_parent:
+        rows.append([KeyboardButton(text="✏️ Название семьи")])
         rows.append([KeyboardButton(text="📜 История")])
         rows.append([KeyboardButton(text="👨‍👩‍👧‍👦 Пригласить")])
         rows.append([KeyboardButton(text="⚙️ Уведомления")])
+
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 def confirm_keyboard():
@@ -167,17 +168,20 @@ def confirm_keyboard():
         InlineKeyboardButton(text="🛒 Покупка", callback_data="confirm:shopping"),
     ]])
 
-def shopping_actions(is_parent: bool):
-    rows = [[InlineKeyboardButton(text="✅ Отметить купленным", callback_data="shop:done")]]
-    if is_parent:
-        rows.append([InlineKeyboardButton(text="🧹 Очистить купленные", callback_data="shop:clear")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def task_actions(task_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task:done:{task_id}")
+    ]])
 
+def shopping_actions(item_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🛒 Куплено", callback_data=f"shop:done:{item_id}")
+    ]])
 def notification_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔔 Все", callback_data="notif:all")],
+        [InlineKeyboardButton(text="🔔 Все уведомления", callback_data="notif:all")],
         [InlineKeyboardButton(text="👤 Только важные", callback_data="notif:important")],
-        [InlineKeyboardButton(text="🔕 Выключить", callback_data="notif:off")]
+        [InlineKeyboardButton(text="🔕 Выключить", callback_data="notif:off")],
     ])
 
 # =====================================================
@@ -186,7 +190,10 @@ def notification_menu():
 
 async def home_text(family_id: int):
     async with db_pool.acquire() as conn:
-        t_total = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE family_id=$1", family_id)
+        title = await conn.fetchval(
+            "SELECT title FROM families WHERE id=$1",
+            family_id
+        )
         t_active = await conn.fetchval(
             "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE",
             family_id
@@ -197,8 +204,8 @@ async def home_text(family_id: int):
         )
 
     return (
-        "👨‍👩‍👧 Семейный менеджер\n\n"
-        f"📋 Активные задачи: {t_active} / {t_total}\n"
+        f"🏠 {title}\n\n"
+        f"📋 Активные задачи: {t_active}\n"
         f"🛒 Покупки в списке: {s_active}\n\n"
         "Выбери действие 👇"
     )
@@ -220,87 +227,68 @@ async def start(message: Message, state: FSMContext):
         await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
     await show_home(message)
-
-@dp.message(F.text == "➕ Добавить")
-async def add_any(message: Message, state: FSMContext):
-    await state.set_state(UserState.confirm_type)
-    await message.answer("Что нужно добавить?")
-
-@dp.message(UserState.confirm_type)
-async def choose_type(message: Message, state: FSMContext):
-    await state.update_data(text=message.text)
-    await message.answer(
-        f"Добавить:\n\n«{message.text}»",
-        reply_markup=confirm_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("confirm:"))
-async def confirm(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    text = data.get("text")
-
-    if not text:
-        await callback.answer(
-            "❗ Действие устарело. Нажми «➕ Добавить» заново",
-            show_alert=True
-        )
-        await state.clear()
-        return
-
-    family_id = await ensure_family(callback.from_user.id)
+@dp.callback_query(F.data.startswith("notif:"))
+async def set_notifications(callback: CallbackQuery):
+    mode = callback.data.split(":")[1]
+    user_id = callback.from_user.id
 
     async with db_pool.acquire() as conn:
-        if callback.data == "confirm:task":
-            await conn.execute(
-                "INSERT INTO tasks (family_id, text) VALUES ($1,$2)",
-                family_id, text
-            )
-            await log_action(family_id, callback.from_user.id, f"добавил задачу «{text}»")
-            await notify_family(
-                family_id,
-                f"🆕 Новая задача:\n{text}",
-                callback.from_user.id,
-                "important"
-            )
-        else:
-            await conn.execute(
-                "INSERT INTO shopping (family_id, text) VALUES ($1,$2)",
-                family_id, text
-            )
-            await log_action(family_id, callback.from_user.id, f"добавил покупку «{text}»")
-            await notify_family(
-                family_id,
-                f"🛒 Добавлено в покупки:\n{text}",
-                callback.from_user.id
-            )
+        await conn.execute(
+            """
+            INSERT INTO user_settings (user_id, notifications)
+            VALUES ($1,$2)
+            ON CONFLICT (user_id)
+            DO UPDATE SET notifications=$2
+            """,
+            user_id, mode
+        )
 
-    await state.clear()
-    await callback.message.delete()
-    await show_home(callback.message)
+    text_map = {
+        "all": "🔔 Теперь ты получаешь ВСЕ уведомления",
+        "important": "👤 Теперь ты получаешь ТОЛЬКО важные уведомления",
+        "off": "🔕 Уведомления выключены",
+    }
 
-@dp.message(F.text == "📜 История")
-async def show_history(message: Message):
+    await callback.answer(text_map.get(mode, "Настройки сохранены"), show_alert=True)
+    await callback.message.edit_reply_markup()
+
+@dp.message(F.text == "✏️ Название семьи")
+async def rename_family_start(message: Message, state: FSMContext):
     if not await is_parent(message.from_user.id):
         return
+    await state.set_state(UserState.rename_family)
+    await message.answer("✏️ Введите новое название семьи:")
+@dp.message(F.text == "⚙️ Уведомления")
+async def notifications_menu(message: Message):
+    await message.answer(
+        "🔔 Настройки уведомлений:\n\n"
+        "• Все — получать все события\n"
+        "• Только важные — задачи, переименования\n"
+        "• Выключить — без уведомлений",
+        reply_markup=notification_menu()
+    )
 
+@dp.message(UserState.rename_family)
+async def rename_family_save(message: Message, state: FSMContext):
     family_id = await get_family_id(message.from_user.id)
+    title = message.text.strip()[:50]
 
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT action FROM activity_log "
-            "WHERE family_id=$1 ORDER BY created_at DESC LIMIT 20",
-            family_id
+        await conn.execute(
+            "UPDATE families SET title=$1 WHERE id=$2",
+            title, family_id
         )
 
-    if not rows:
-        await message.answer("История пока пуста")
-        return
+    await log_action(family_id, message.from_user.id, f"переименовал семью в «{title}»")
+    await notify_family(
+        family_id,
+        f"🏠 Название семьи изменено на:\n{title}",
+        message.from_user.id,
+        "important"
+    )
 
-    text = "📜 Последние действия:\n\n"
-    for r in rows:
-        text += f"• {r['action']}\n"
-
-    await message.answer(text)
+    await state.clear()
+    await show_home(message)
 
 # =====================================================
 # MAIN
@@ -309,7 +297,7 @@ async def show_history(message: Message):
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
-    print("🤖 Bot started — CLEAN STABLE VERSION")
+    print("🤖 Bot started — FAMILY NAME VERSION")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

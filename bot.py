@@ -209,6 +209,80 @@ async def start(message: Message, state: FSMContext):
         await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
     await show_home(message)
+
+# ==========================
+# ЗАДАЧИ
+# ==========================
+
+@dp.message(F.text == "📋 Задачи")
+async def show_tasks(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, text, done FROM tasks WHERE family_id=$1 ORDER BY id DESC",
+            family_id
+        )
+
+    if not rows:
+        await message.answer("📋 Задач пока нет")
+        return
+
+    text = "📋 Список задач:\n\n"
+    for r in rows:
+        status = "✅" if r["done"] else "🔲"
+        text += f"{status} {r['text']}\n"
+
+    await message.answer(text)
+
+
+# ==========================
+# ПОКУПКИ
+# ==========================
+
+@dp.message(F.text == "🛒 Покупки")
+async def show_shopping(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, text, is_bought FROM shopping WHERE family_id=$1 ORDER BY id DESC",
+            family_id
+        )
+
+    if not rows:
+        await message.answer("🛒 Список покупок пуст")
+        return
+
+    text = "🛒 Список покупок:\n\n"
+    for r in rows:
+        status = "✅" if r["is_bought"] else "🛒"
+        text += f"{status} {r['text']}\n"
+
+    await message.answer(text)
+
+
+# ==========================
+# СЕМЬЯ
+# ==========================
+
+@dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
+async def show_family(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id, role FROM family_members WHERE family_id=$1",
+            family_id
+        )
+
+    text = "👨‍👩‍👧‍👦 Участники семьи:\n\n"
+    for r in rows:
+        role = "👑 Родитель" if r["role"] == "parent" else "👶 Ребёнок"
+        text += f"{role} — {r['user_id']}\n"
+
+    await message.answer(text)
+    
 @dp.callback_query(F.data.startswith("notif:"))
 async def set_notifications(callback: CallbackQuery):
     mode = callback.data.split(":")[1]

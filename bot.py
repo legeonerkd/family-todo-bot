@@ -195,8 +195,16 @@ async def home_text(family_id: int):
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
-    await message.answer(await home_text(family_id), reply_markup=main_menu(parent))
 
+    # Сначала убираем старую клавиатуру
+    await message.answer(" ", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+
+    # Потом отправляем нормальное меню
+    await message.answer(
+        await home_text(family_id),
+        reply_markup=main_menu(parent)
+    )
+    
 # =====================================================
 # HANDLERS
 # =====================================================
@@ -214,7 +222,6 @@ async def start(message: Message, state: FSMContext):
         await message.answer("🎉 Ты присоединился к семье!")
 
     await show_home(message)
-
 
 # ==========================
 # ДОБАВЛЕНИЕ

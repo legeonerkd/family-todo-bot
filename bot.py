@@ -211,6 +211,68 @@ async def start(message: Message, state: FSMContext):
     await show_home(message)
 
 # ==========================
+# ДОБАВЛЕНИЕ
+# ==========================
+
+@dp.message(F.text == "➕ Добавить")
+async def add_any(message: Message, state: FSMContext):
+    await state.set_state(UserState.confirm_type)
+    await message.answer("Введите текст задачи или покупки:")
+
+
+@dp.message(UserState.confirm_type)
+async def choose_type(message: Message, state: FSMContext):
+    await state.update_data(text=message.text)
+
+    await message.answer(
+        f"Добавить:\n\n«{message.text}»",
+        reply_markup=confirm_keyboard()
+    )
+
+
+@dp.callback_query(F.data.startswith("confirm:"))
+async def confirm_add(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    text = data.get("text")
+
+    if not text:
+        await callback.answer("Действие устарело", show_alert=True)
+        await state.clear()
+        return
+
+    family_id = await ensure_family(callback.from_user.id)
+
+    async with get_pool().acquire() as conn:
+        if callback.data == "confirm:task":
+            await conn.execute(
+                "INSERT INTO tasks (family_id, text) VALUES ($1,$2)",
+                family_id, text
+            )
+            await log_action(family_id, callback.from_user.id, f"добавил задачу «{text}»")
+            await notify_family(
+                family_id,
+                f"🆕 Новая задача:\n{text}",
+                callback.from_user.id,
+                "important"
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO shopping (family_id, text) VALUES ($1,$2)",
+                family_id, text
+            )
+            await log_action(family_id, callback.from_user.id, f"добавил покупку «{text}»")
+            await notify_family(
+                family_id,
+                f"🛒 Добавлено в покупки:\n{text}",
+                callback.from_user.id
+            )
+
+    await state.clear()
+    await callback.message.delete()
+    await show_home(callback.message)
+
+
+# ==========================
 # ЗАДАЧИ
 # ==========================
 
@@ -277,12 +339,21 @@ async def show_family(message: Message):
         )
 
     text = "👨‍👩‍👧‍👦 Участники семьи:\n\n"
+
     for r in rows:
         role = "👑 Родитель" if r["role"] == "parent" else "👶 Ребёнок"
-        text += f"{role} — {r['user_id']}\n"
+
+        try:
+            chat = await bot.get_chat(r["user_id"])
+            name = chat.first_name or "Без имени"
+        except:
+            name = f"id:{r['user_id']}"
+
+        text += f"{role} — {name}\n"
 
     await message.answer(text)
-    
+
+
 @dp.callback_query(F.data.startswith("notif:"))
 async def set_notifications(callback: CallbackQuery):
     mode = callback.data.split(":")[1]

@@ -196,15 +196,14 @@ async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
 
-    # Сначала убираем старую клавиатуру
-    await message.answer(" ", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    print("Sending menu to:", message.from_user.id)
 
-    # Потом отправляем нормальное меню
-    await message.answer(
+    await bot.send_message(
+        message.from_user.id,
         await home_text(family_id),
         reply_markup=main_menu(parent)
     )
-    
+
 # =====================================================
 # HANDLERS
 # =====================================================

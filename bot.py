@@ -204,11 +204,17 @@ async def show_home(message: Message):
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
     await state.clear()
+
+    # ВАЖНО: принудительно обновляем меню
+    await show_home(message)
+
     args = message.text.split()
     if len(args) == 2 and args[1].isdigit():
         await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
+
     await show_home(message)
+
 
 # ==========================
 # ДОБАВЛЕНИЕ
@@ -279,6 +285,11 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
 @dp.message(F.text == "📋 Задачи")
 async def show_tasks(message: Message):
     family_id = await get_family_id(message.from_user.id)
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+        "DELETE FROM tasks WHERE family_id=$1 AND done=TRUE",
+        family_id
+        )
 
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
@@ -309,6 +320,13 @@ async def show_shopping(message: Message):
     family_id = await get_family_id(message.from_user.id)
 
     async with get_pool().acquire() as conn:
+        await conn.execute(
+        "DELETE FROM shopping WHERE family_id=$1 AND is_bought=TRUE",
+        family_id
+        )
+
+
+    async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, text, is_bought FROM shopping WHERE family_id=$1 ORDER BY id DESC",
             family_id
@@ -325,8 +343,6 @@ async def show_shopping(message: Message):
             f"{status} {r['text']}",
             reply_markup=shopping_actions(r["id"]) if not r["is_bought"] else None
         )
-
-
 
 # ==========================
 # СЕМЬЯ

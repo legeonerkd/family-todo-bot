@@ -290,12 +290,14 @@ async def show_tasks(message: Message):
         await message.answer("📋 Задач пока нет")
         return
 
-    text = "📋 Список задач:\n\n"
     for r in rows:
         status = "✅" if r["done"] else "🔲"
-        text += f"{status} {r['text']}\n"
 
-    await message.answer(text)
+        await message.answer(
+            f"{status} {r['text']}",
+            reply_markup=task_actions(r["id"]) if not r["done"] else None
+        )
+
 
 
 # ==========================
@@ -316,12 +318,14 @@ async def show_shopping(message: Message):
         await message.answer("🛒 Список покупок пуст")
         return
 
-    text = "🛒 Список покупок:\n\n"
     for r in rows:
         status = "✅" if r["is_bought"] else "🛒"
-        text += f"{status} {r['text']}\n"
 
-    await message.answer(text)
+        await message.answer(
+            f"{status} {r['text']}",
+            reply_markup=shopping_actions(r["id"]) if not r["is_bought"] else None
+        )
+
 
 
 # ==========================
@@ -470,6 +474,31 @@ async def remove_member(callback: CallbackQuery):
     await callback.answer("Участник удалён", show_alert=True)
     await callback.message.delete()
 
+@dp.callback_query(F.data.startswith("task:done:"))
+async def mark_task_done(callback: CallbackQuery):
+    task_id = int(callback.data.split(":")[2])
+
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE tasks SET done=TRUE WHERE id=$1",
+            task_id
+        )
+
+    await callback.answer("Задача выполнена ✅")
+    await callback.message.edit_reply_markup()
+
+@dp.callback_query(F.data.startswith("shop:done:"))
+async def mark_shop_done(callback: CallbackQuery):
+    item_id = int(callback.data.split(":")[2])
+
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE shopping SET is_bought=TRUE WHERE id=$1",
+            item_id
+        )
+
+    await callback.answer("Покупка отмечена ✅")
+    await callback.message.edit_reply_markup()
 
 @dp.message(F.text == "✏️ Название семьи")
 async def rename_family_start(message: Message, state: FSMContext):

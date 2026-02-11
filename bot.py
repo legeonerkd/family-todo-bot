@@ -1,11 +1,5 @@
 import asyncio
-import os
-
-from dotenv import load_dotenv
-load_dotenv()
-
-import asyncpg
-
+from config import BOT_TOKEN, DATABASE_URL
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery,
@@ -16,20 +10,16 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from db import init_db, get_pool
 
 # =====================================================
 # CONFIG
 # =====================================================
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
-
 if not BOT_TOKEN or not DATABASE_URL:
     raise RuntimeError("ENV variables not set")
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-db_pool: asyncpg.Pool | None = None
 
 # =====================================================
 # FSM
@@ -40,19 +30,11 @@ class UserState(StatesGroup):
     rename_family = State()
 
 # =====================================================
-# DB INIT
-# =====================================================
-
-async def init_db():
-    global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
-
-# =====================================================
 # HELPERS: FAMILY & ROLES
 # =====================================================
 
 async def get_member(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetchrow(
             "SELECT family_id, role FROM family_members WHERE user_id=$1",
             user_id
@@ -67,7 +49,7 @@ async def is_parent(user_id: int) -> bool:
     return bool(m and m["role"] == "parent")
 
 async def ensure_family(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         m = await conn.fetchrow(
             "SELECT family_id FROM family_members WHERE user_id=$1",
             user_id
@@ -87,7 +69,7 @@ async def ensure_family(user_id: int):
         return fam["id"]
 
 async def add_user_to_family(user_id: int, family_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute(
             """
             INSERT INTO family_members (user_id, family_id, role)
@@ -103,7 +85,7 @@ async def add_user_to_family(user_id: int, family_id: int):
 # =====================================================
 
 async def get_notif_mode(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             "SELECT notifications FROM user_settings WHERE user_id=$1",
             user_id
@@ -111,7 +93,7 @@ async def get_notif_mode(user_id: int):
         return row["notifications"] if row else "all"
 
 async def notify_family(family_id: int, text: str, author_id: int, level="all"):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         users = await conn.fetch(
             "SELECT user_id FROM family_members "
             "WHERE family_id=$1 AND user_id!=$2",
@@ -134,7 +116,7 @@ async def notify_family(family_id: int, text: str, author_id: int, level="all"):
 # =====================================================
 
 async def log_action(family_id: int, user_id: int, action: str):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute(
             "INSERT INTO activity_log (family_id, user_id, action) "
             "VALUES ($1,$2,$3)",
@@ -189,7 +171,7 @@ def notification_menu():
 # =====================================================
 
 async def home_text(family_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         title = await conn.fetchval(
             "SELECT title FROM families WHERE id=$1",
             family_id
@@ -232,7 +214,7 @@ async def set_notifications(callback: CallbackQuery):
     mode = callback.data.split(":")[1]
     user_id = callback.from_user.id
 
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute(
             """
             INSERT INTO user_settings (user_id, notifications)
@@ -245,12 +227,104 @@ async def set_notifications(callback: CallbackQuery):
 
     text_map = {
         "all": "🔔 Теперь ты получаешь ВСЕ уведомления",
-        "important": "👤 Теперь ты получаешь ТОЛЬКО важные уведомления",
+        "important": "👤 Теперь только важные уведомления",
         "off": "🔕 Уведомления выключены",
     }
 
-    await callback.answer(text_map.get(mode, "Настройки сохранены"), show_alert=True)
+    await callback.answer(text_map[mode], show_alert=True)
     await callback.message.edit_reply_markup()
+
+@dp.callback_query(F.data == "family:remove")
+async def choose_member_to_remove(callback: CallbackQuery):
+    user_id = callback.from_user.id
+
+    if not await is_parent(user_id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+
+    family_id = await get_family_id(user_id)
+
+    async with get_pool().acquire() as conn:
+        members = await conn.fetch(
+            "SELECT user_id, role FROM family_members WHERE family_id=$1",
+            family_id
+        )
+
+    buttons = []
+    for m in members:
+        if m["user_id"] == user_id:
+            continue  # нельзя удалить себя
+
+        role_icon = "👑" if m["role"] == "parent" else "👶"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{role_icon} {m['user_id']}",
+                callback_data=f"remove:{m['user_id']}"
+            )
+        ])
+
+    if not buttons:
+        await callback.answer("Некого удалять", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "Выберите участника для удаления:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+@dp.callback_query(F.data.startswith("remove:"))
+async def remove_member(callback: CallbackQuery):
+    requester_id = callback.from_user.id
+    target_id = int(callback.data.split(":")[1])
+
+    if not await is_parent(requester_id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+
+    family_id = await get_family_id(requester_id)
+
+    async with get_pool().acquire() as conn:
+        # Проверяем участника
+        target = await conn.fetchrow(
+            "SELECT role FROM family_members WHERE user_id=$1 AND family_id=$2",
+            target_id, family_id
+        )
+
+        if not target:
+            await callback.answer("Участник не найден", show_alert=True)
+            return
+
+        # Защита последнего родителя
+        if target["role"] == "parent":
+            parents_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM family_members WHERE family_id=$1 AND role='parent'",
+                family_id
+            )
+            if parents_count <= 1:
+                await callback.answer("Нельзя удалить последнего родителя", show_alert=True)
+                return
+
+        # Удаляем
+        await conn.execute(
+            "DELETE FROM family_members WHERE user_id=$1 AND family_id=$2",
+            target_id, family_id
+        )
+
+    await log_action(family_id, requester_id, f"удалил участника {target_id}")
+    await notify_family(
+        family_id,
+        f"❌ Участник {target_id} был удалён из семьи",
+        requester_id,
+        "important"
+    )
+
+    try:
+        await bot.send_message(target_id, "❌ Вы были удалены из семьи")
+    except:
+        pass
+
+    await callback.answer("Участник удалён", show_alert=True)
+    await callback.message.delete()
+
 
 @dp.message(F.text == "✏️ Название семьи")
 async def rename_family_start(message: Message, state: FSMContext):
@@ -273,7 +347,7 @@ async def rename_family_save(message: Message, state: FSMContext):
     family_id = await get_family_id(message.from_user.id)
     title = message.text.strip()[:50]
 
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute(
             "UPDATE families SET title=$1 WHERE id=$2",
             title, family_id
@@ -289,6 +363,8 @@ async def rename_family_save(message: Message, state: FSMContext):
 
     await state.clear()
     await show_home(message)
+
+
 
 # =====================================================
 # MAIN

@@ -594,19 +594,14 @@ async def rename_family_save(message: Message, state: FSMContext):
 # =====================================================
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
 
-    # 🔧 Migration: add title column if not exists
     async with get_pool().acquire() as conn:
         await conn.execute(
             "ALTER TABLE families ADD COLUMN IF NOT EXISTS title TEXT DEFAULT 'Наша семья';"
         )
 
-    print("🤖 Bot started — SINGLE INSTANCE MODE")
+    print("🤖 Bot started — STABLE VERSION")
+    await dp.start_polling(bot)
 
-    try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        print("❌ BOT CRASHED:", e)
 

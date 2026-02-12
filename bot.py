@@ -171,15 +171,23 @@ def notification_menu():
 # =====================================================
 
 async def home_text(family_id: int):
+    if not family_id:
+        return "🏠 Семья не найдена"
+
     async with get_pool().acquire() as conn:
         title = await conn.fetchval(
             "SELECT title FROM families WHERE id=$1",
             family_id
         )
+
+        if not title:
+            title = "Наша семья"
+
         t_active = await conn.fetchval(
             "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE",
             family_id
         )
+
         s_active = await conn.fetchval(
             "SELECT COUNT(*) FROM shopping WHERE family_id=$1 AND is_bought=FALSE",
             family_id
@@ -187,10 +195,11 @@ async def home_text(family_id: int):
 
     return (
         f"🏠 {title}\n\n"
-        f"📋 Активные задачи: {t_active}\n"
-        f"🛒 Покупки в списке: {s_active}\n\n"
+        f"📋 Активные задачи: {t_active or 0}\n"
+        f"🛒 Покупки в списке: {s_active or 0}\n\n"
         "Выбери действие 👇"
     )
+
 
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)

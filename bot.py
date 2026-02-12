@@ -199,22 +199,10 @@ async def show_home(message: Message):
     print("USER:", message.from_user.id)
     print("IS_PARENT:", parent)
 
-    # удаляем клавиатуру
-    await message.answer(
-        " ",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    # небольшая пауза
-    await asyncio.sleep(0.3)
-
-    # отправляем новую
     await message.answer(
         await home_text(family_id),
         reply_markup=main_menu(parent)
     )
-
-    
 
 # =====================================================
 # HANDLERS

@@ -176,12 +176,13 @@ async def home_text(family_id: int):
 
     async with get_pool().acquire() as conn:
         title = await conn.fetchval(
-            "SELECT title FROM families WHERE id=$1",
+            "SELECT COALESCE(title, 'Наша семья') FROM families WHERE id=$1",
             family_id
         )
 
         if not title:
             title = "Наша семья"
+
 
         t_active = await conn.fetchval(
             "SELECT COUNT(*) FROM tasks WHERE family_id=$1 AND done=FALSE",
@@ -193,13 +194,14 @@ async def home_text(family_id: int):
             family_id
         )
 
-    return (
-        f"🏠 {title}\n\n"
-        f"📋 Активные задачи: {t_active or 0}\n"
-        f"🛒 Покупки в списке: {s_active or 0}\n\n"
-        "Выбери действие 👇"
-    )
+        result = (
+            f"🏠 {title}\n\n"
+            f"📋 Активные задачи: {t_active}\n"
+            f"🛒 Покупки в списке: {s_active}\n\n"
+            "Выбери действие 👇"
+        )
 
+        return result or "🏠 Наша семья"
 
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)

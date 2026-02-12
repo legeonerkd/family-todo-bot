@@ -209,6 +209,8 @@ async def show_home(message: Message):
         await home_text(family_id),
         reply_markup=main_menu(parent)
     )
+    print("MENU:", main_menu(parent).keyboard)
+
 # =====================================================
 # HANDLERS
 # =====================================================

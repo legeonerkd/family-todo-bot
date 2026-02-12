@@ -195,6 +195,8 @@ async def home_text(family_id: int):
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
+    print("USER:", message.from_user.id)
+    print("IS_PARENT:", parent)
 
     print("Sending menu to:", message.from_user.id)
 

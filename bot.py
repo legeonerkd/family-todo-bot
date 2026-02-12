@@ -594,7 +594,6 @@ async def rename_family_save(message: Message, state: FSMContext):
 # =====================================================
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
 
         # 🔧 Migration: add title column if not exists

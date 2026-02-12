@@ -212,15 +212,15 @@ async def show_home(message: Message):
 async def start(message: Message, state: FSMContext):
     await state.clear()
 
-    # ВАЖНО: принудительно обновляем меню
-    await show_home(message)
-
     args = message.text.split()
+
     if len(args) == 2 and args[1].isdigit():
         await add_user_to_family(message.from_user.id, int(args[1]))
         await message.answer("🎉 Ты присоединился к семье!")
 
     await show_home(message)
+
+
 @dp.message(F.text == "👨‍👩‍👧‍👦 Пригласить")
 async def invite_member(message: Message):
     if not await is_parent(message.from_user.id):

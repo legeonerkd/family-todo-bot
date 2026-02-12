@@ -221,6 +221,22 @@ async def start(message: Message, state: FSMContext):
         await message.answer("🎉 Ты присоединился к семье!")
 
     await show_home(message)
+@dp.message(F.text == "👨‍👩‍👧‍👦 Пригласить")
+async def invite_member(message: Message):
+    if not await is_parent(message.from_user.id):
+        await message.answer("Только родитель может приглашать участников.")
+        return
+
+    family_id = await get_family_id(message.from_user.id)
+
+    bot_info = await bot.get_me()
+    invite_link = f"https://t.me/{bot_info.username}?start={family_id}"
+
+    await message.answer(
+        "🔗 Ссылка для приглашения:\n\n"
+        f"{invite_link}\n\n"
+        "Отправьте её тому, кого хотите добавить в семью."
+    )
 
 # ==========================
 # ДОБАВЛЕНИЕ

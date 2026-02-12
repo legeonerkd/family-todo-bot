@@ -195,7 +195,9 @@ async def home_text(family_id: int):
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
-
+    
+    print("USER:", message.from_user.id)
+    print("IS_PARENT:", parent)
     # Сначала удаляем старую клавиатуру
     await bot.send_message(
         message.from_user.id,
@@ -210,6 +212,7 @@ async def show_home(message: Message):
         reply_markup=main_menu(parent)
     )
     print("MENU:", main_menu(parent).keyboard)
+    
 
 # =====================================================
 # HANDLERS

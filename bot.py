@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from db import init_db, get_pool
-
+from aiogram.types import ReplyKeyboardRemove
 # =====================================================
 # CONFIG
 # =====================================================
@@ -195,17 +195,20 @@ async def home_text(family_id: int):
 async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
-    print("USER:", message.from_user.id)
-    print("IS_PARENT:", parent)
 
-    print("Sending menu to:", message.from_user.id)
+    # Сначала удаляем старую клавиатуру
+    await bot.send_message(
+        message.from_user.id,
+        "Обновляем меню...",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
+    # Потом отправляем новую
     await bot.send_message(
         message.from_user.id,
         await home_text(family_id),
         reply_markup=main_menu(parent)
     )
-
 # =====================================================
 # HANDLERS
 # =====================================================

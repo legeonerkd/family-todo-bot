@@ -420,7 +420,6 @@ async def show_shopping(message: Message):
 @dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
 async def show_family(message: Message):
     family_id = await get_family_id(message.from_user.id)
-    parent = await is_parent(message.from_user.id)
 
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
@@ -443,25 +442,16 @@ async def show_family(message: Message):
 
     keyboard = None
 
-    if parent:
+    # Кнопка удаления только для родителя
+    if await is_parent(message.from_user.id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
-                text="❌ Удалить участника",
+                text="➖ Удалить участника",
                 callback_data="family:remove"
             )]
         ])
 
     await message.answer(text, reply_markup=keyboard)
-    if await is_parent(message.from_user.id):
-        keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Удалить участника", callback_data="family:remove")]
-        ]
-    )
-        await message.answer(text, reply_markup=keyboard)
-    else:
-        await message.answer(text)
-
 
 @dp.callback_query(F.data.startswith("notif:"))
 async def set_notifications(callback: CallbackQuery):
@@ -490,13 +480,11 @@ async def set_notifications(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "family:remove")
 async def choose_member_to_remove(callback: CallbackQuery):
-    user_id = callback.from_user.id
-
-    if not await is_parent(user_id):
+    if not await is_parent(callback.from_user.id):
         await callback.answer("Недостаточно прав", show_alert=True)
         return
 
-    family_id = await get_family_id(user_id)
+    family_id = await get_family_id(callback.from_user.id)
 
     async with get_pool().acquire() as conn:
         members = await conn.fetch(
@@ -507,8 +495,8 @@ async def choose_member_to_remove(callback: CallbackQuery):
     buttons = []
 
     for m in members:
-        if m["user_id"] == user_id:
-            continue  # нельзя удалить себя
+        if m["user_id"] == callback.from_user.id:
+            continue
 
         try:
             chat = await bot.get_chat(m["user_id"])
@@ -516,24 +504,16 @@ async def choose_member_to_remove(callback: CallbackQuery):
         except:
             name = f"id:{m['user_id']}"
 
-        role_icon = "👑" if m["role"] == "parent" else "👶"
-
         buttons.append([
             InlineKeyboardButton(
-                text=f"❌ {role_icon} {name}",
+                text=f"Удалить {name}",
                 callback_data=f"remove:{m['user_id']}"
             )
         ])
 
-    if not buttons:
-        await callback.answer("Некого удалять", show_alert=True)
-        return
-
-    await callback.message.edit_text(
-        "Выберите участника для удаления:",
+    await callback.message.edit_reply_markup(
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
-
 
 @dp.callback_query(F.data.startswith("remove:"))
 async def remove_member(callback: CallbackQuery):

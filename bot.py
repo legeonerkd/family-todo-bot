@@ -209,13 +209,16 @@ async def show_home(message: Message):
     family_id = await ensure_family(message.from_user.id)
     parent = await is_parent(message.from_user.id)
 
-    print("USER:", message.from_user.id)
-    print("IS_PARENT:", parent)
+    text = await home_text(family_id)
+
+    if not text:
+        text = "🏠 Наша семья"
 
     await message.answer(
-        await home_text(family_id),
+        text,
         reply_markup=main_menu(parent)
     )
+
 
 # =====================================================
 # HANDLERS
@@ -604,11 +607,27 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-# =====================================================
-# MAIN
-# =====================================================
+
+# ==================================
+# WEBHOOK SERVER FOR RAILWAY
+# ==================================
+
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_SECRET = "supersecret"
+WEBHOOK_URL = f"https://{os.environ.get('RAILWAY_STATIC_URL')}{WEBHOOK_PATH}"
+
+async def on_startup():
+    await bot.set_webhook(
+        WEBHOOK_URL,
+        secret_token=WEBHOOK_SECRET
+    )
+    print("Webhook set:", WEBHOOK_URL)
+
+async def on_shutdown():
+    await bot.delete_webhook()
+    print("Webhook deleted")
+
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
 
     async with get_pool().acquire() as conn:
@@ -616,14 +635,27 @@ async def main():
             "ALTER TABLE families ADD COLUMN IF NOT EXISTS title TEXT DEFAULT 'Наша семья';"
         )
 
-    print("🤖 Bot started")
+    print("🤖 Bot started (WEBHOOK MODE)")
 
-    # запускаем web server в фоне
-    asyncio.create_task(start_web_server())
+    # Регистрируем webhook-роут
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
 
-    # запускаем polling
-    await dp.start_polling(bot)
-    
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+    app = web.Application()
+
+    SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=WEBHOOK_SECRET,
+    ).register(app, path=WEBHOOK_PATH)
+
+    setup_application(app, dp, bot=bot)
+
+    port = int(os.environ.get("PORT", 8080))
+    await web._run_app(app, host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
     asyncio.run(main())
 

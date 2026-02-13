@@ -253,6 +253,37 @@ async def invite_member(message: Message):
         f"{invite_link}\n\n"
         "Отправьте её тому, кого хотите добавить в семью."
     )
+@dp.message(F.text == "📜 История")
+async def show_history(message: Message):
+    family_id = await get_family_id(message.from_user.id)
+
+    if not family_id:
+        await message.answer("Семья не найдена")
+        return
+
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT action, created_at
+            FROM activity_log
+            WHERE family_id=$1
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            family_id
+        )
+
+    if not rows:
+        await message.answer("📜 История пока пуста")
+        return
+
+    text = "📜 Последние действия:\n\n"
+
+    for r in rows:
+        time_str = r["created_at"].strftime("%d.%m %H:%M")
+        text += f"🕒 {time_str} — {r['action']}\n"
+
+    await message.answer(text)
 
 # ==========================
 # ДОБАВЛЕНИЕ

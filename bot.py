@@ -1,4 +1,6 @@
 import asyncio
+import os
+from aiohttp import web
 from config import BOT_TOKEN, DATABASE_URL
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -586,6 +588,22 @@ async def rename_family_save(message: Message, state: FSMContext):
 
     await state.clear()
     await show_home(message)
+# ==================================
+# HEALTH SERVER FOR RAILWAY
+# ==================================
+
+async def handle(request):
+    return web.Response(text="Bot is running")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+
+    port = int(os.environ.get("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
 
 
 
@@ -594,6 +612,7 @@ async def rename_family_save(message: Message, state: FSMContext):
 # =====================================================
 
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
 
     async with get_pool().acquire() as conn:
@@ -601,7 +620,12 @@ async def main():
             "ALTER TABLE families ADD COLUMN IF NOT EXISTS title TEXT DEFAULT 'Наша семья';"
         )
 
-    print("🤖 Bot started — STABLE VERSION")
+    print("🤖 Bot started")
+
+    # запускаем health сервер
+    await start_web_server()
+
+    # запускаем бота
     await dp.start_polling(bot)
 
 

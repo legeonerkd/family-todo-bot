@@ -604,7 +604,9 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-
+# =====================================================
+# MAIN
+# =====================================================
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
@@ -616,9 +618,9 @@ async def main():
 
     print("🤖 Bot started")
 
-    await asyncio.gather(
-        start_web_server(),
-        dp.start_polling(bot)
-    )
+    # запускаем web server в фоне
+    asyncio.create_task(start_web_server())
 
+    # запускаем polling
+    await dp.start_polling(bot)
 

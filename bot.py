@@ -616,11 +616,9 @@ async def main():
 
     print("🤖 Bot started")
 
-    # запускаем web server и polling параллельно
     await asyncio.gather(
         start_web_server(),
         dp.start_polling(bot)
     )
-
 
 

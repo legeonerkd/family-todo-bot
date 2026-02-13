@@ -420,6 +420,7 @@ async def show_shopping(message: Message):
 @dp.message(F.text == "👨‍👩‍👧‍👦 Семья")
 async def show_family(message: Message):
     family_id = await get_family_id(message.from_user.id)
+    parent = await is_parent(message.from_user.id)
 
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
@@ -440,8 +441,17 @@ async def show_family(message: Message):
 
         text += f"{role} — {name}\n"
 
-    await message.answer(text)
+    keyboard = None
 
+    if parent:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="❌ Удалить участника",
+                callback_data="family:remove"
+            )]
+        ])
+
+    await message.answer(text, reply_markup=keyboard)
 
 @dp.callback_query(F.data.startswith("notif:"))
 async def set_notifications(callback: CallbackQuery):
@@ -471,12 +481,11 @@ async def set_notifications(callback: CallbackQuery):
 @dp.callback_query(F.data == "family:remove")
 async def choose_member_to_remove(callback: CallbackQuery):
     user_id = callback.from_user.id
+    family_id = await get_family_id(user_id)
 
     if not await is_parent(user_id):
         await callback.answer("Недостаточно прав", show_alert=True)
         return
-
-    family_id = await get_family_id(user_id)
 
     async with get_pool().acquire() as conn:
         members = await conn.fetch(
@@ -485,14 +494,14 @@ async def choose_member_to_remove(callback: CallbackQuery):
         )
 
     buttons = []
+
     for m in members:
         if m["user_id"] == user_id:
             continue  # нельзя удалить себя
 
-        role_icon = "👑" if m["role"] == "parent" else "👶"
         buttons.append([
             InlineKeyboardButton(
-                text=f"{role_icon} {m['user_id']}",
+                text=f"Удалить {m['user_id']}",
                 callback_data=f"remove:{m['user_id']}"
             )
         ])
@@ -505,19 +514,18 @@ async def choose_member_to_remove(callback: CallbackQuery):
         "Выберите участника для удаления:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
+
 @dp.callback_query(F.data.startswith("remove:"))
 async def remove_member(callback: CallbackQuery):
     requester_id = callback.from_user.id
     target_id = int(callback.data.split(":")[1])
+    family_id = await get_family_id(requester_id)
 
     if not await is_parent(requester_id):
         await callback.answer("Недостаточно прав", show_alert=True)
         return
 
-    family_id = await get_family_id(requester_id)
-
     async with get_pool().acquire() as conn:
-        # Проверяем участника
         target = await conn.fetchrow(
             "SELECT role FROM family_members WHERE user_id=$1 AND family_id=$2",
             target_id, family_id
@@ -527,37 +535,29 @@ async def remove_member(callback: CallbackQuery):
             await callback.answer("Участник не найден", show_alert=True)
             return
 
-        # Защита последнего родителя
         if target["role"] == "parent":
             parents_count = await conn.fetchval(
                 "SELECT COUNT(*) FROM family_members WHERE family_id=$1 AND role='parent'",
                 family_id
             )
+
             if parents_count <= 1:
                 await callback.answer("Нельзя удалить последнего родителя", show_alert=True)
                 return
 
-        # Удаляем
         await conn.execute(
             "DELETE FROM family_members WHERE user_id=$1 AND family_id=$2",
             target_id, family_id
         )
 
-    await log_action(family_id, requester_id, f"удалил участника {target_id}")
-    await notify_family(
-        family_id,
-        f"❌ Участник {target_id} был удалён из семьи",
-        requester_id,
-        "important"
-    )
+    await callback.answer("Участник удалён", show_alert=True)
+    await callback.message.delete()
 
     try:
         await bot.send_message(target_id, "❌ Вы были удалены из семьи")
     except:
         pass
 
-    await callback.answer("Участник удалён", show_alert=True)
-    await callback.message.delete()
 
 @dp.callback_query(F.data.startswith("task:done:"))
 async def mark_task_done(callback: CallbackQuery):

@@ -21,7 +21,12 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS families (
                 id SERIAL PRIMARY KEY,
                 name TEXT DEFAULT 'Моя семья',
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                emoji_task TEXT DEFAULT '📋',
+                emoji_shopping TEXT DEFAULT '🛒',
+                emoji_family TEXT DEFAULT '👨‍👩‍👧‍👦',
+                emoji_history TEXT DEFAULT '📜',
+                emoji_add TEXT DEFAULT '➕'
             )
         """)
         
@@ -166,6 +171,32 @@ async def init_db():
             await conn.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS action_type TEXT DEFAULT 'other'")
         except:
             pass
+        
+        # Добавляем колонки для кастомизации эмодзи
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS emoji_task TEXT DEFAULT '📋'")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS emoji_shopping TEXT DEFAULT '🛒'")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS emoji_family TEXT DEFAULT '👨‍👩‍👧‍👦'")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS emoji_history TEXT DEFAULT '📜'")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS emoji_add TEXT DEFAULT '➕'")
+        except:
+            pass
 
 
 def get_pool():
@@ -217,6 +248,26 @@ async def is_parent(user_id: int) -> bool:
             user_id
         )
         return row and row['role'] == 'parent'
+
+
+async def get_family_settings(family_id: int) -> dict:
+    """Получить настройки семьи (название и эмодзи)"""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT name, emoji_task, emoji_shopping, emoji_family, emoji_history, emoji_add
+               FROM families WHERE id=$1""",
+            family_id
+        )
+        if row:
+            return dict(row)
+        return {
+            'name': 'Моя семья',
+            'emoji_task': '📋',
+            'emoji_shopping': '🛒',
+            'emoji_family': '👨‍👩‍👧‍👦',
+            'emoji_history': '📜',
+            'emoji_add': '➕'
+        }
 
 
 async def log_activity(family_id: int, user_id: int, action: str, action_type: str = 'other'):

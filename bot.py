@@ -2,7 +2,7 @@ import asyncio
 from aiohttp import web
 from db import dp, bot, init_db, close_db
 from config import WEBHOOK_SECRET, RAILWAY_STATIC_URL
-from handlers import start, tasks, family, history, shopping
+from handlers import start, tasks, family, history, shopping, settings
 from scheduler import schedule_daily_digest
 
 WEBHOOK_PATH = "/webhook"
@@ -13,6 +13,7 @@ dp.include_router(tasks.router)
 dp.include_router(shopping.router)
 dp.include_router(family.router)
 dp.include_router(history.router)
+dp.include_router(settings.router)
 
 async def on_startup():
     await init_db()

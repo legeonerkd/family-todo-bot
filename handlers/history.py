@@ -69,8 +69,17 @@ async def change_page(callback: CallbackQuery):
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(query, *params)
     
+    print(f"History filter: {filter_type}, page: {page}, rows found: {len(rows)}")
+    
     if not rows:
-        await callback.answer("📜 История пуста", show_alert=True)
+        filter_names = {
+            'all': 'Вся история',
+            'task': 'История задач',
+            'shopping': 'История покупок',
+            'role': 'История изменений ролей',
+            'admin': 'Админ-логи'
+        }
+        await callback.answer(f"📜 {filter_names.get(filter_type, 'История')} пуста", show_alert=True)
         return
     
     # Формируем текст с эмодзи типов

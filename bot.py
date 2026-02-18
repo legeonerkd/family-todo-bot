@@ -2,13 +2,14 @@ import asyncio
 from aiohttp import web
 from db import dp, bot, init_db, close_db
 from config import WEBHOOK_SECRET, RAILWAY_STATIC_URL
-from handlers import start, tasks, family, history
+from handlers import start, tasks, family, history, shopping
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
 
 dp.include_router(start.router)
 dp.include_router(tasks.router)
+dp.include_router(shopping.router)
 dp.include_router(family.router)
 dp.include_router(history.router)
 

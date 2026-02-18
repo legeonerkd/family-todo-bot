@@ -98,14 +98,17 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
             task_name = "покупку"
     
     # Отправляем уведомление
+    notification_sent = False
     if assigned_to and assigned_to != callback.from_user.id:
         try:
             await bot.send_message(
                 assigned_to,
                 f"{task_emoji} Вам назначена {task_name}:\n\n«{text}»\n\n👤 От: {creator_name}"
             )
+            notification_sent = True
+            print(f"Notification sent to {assigned_to}")
         except Exception as e:
-            print(f"Failed to send notification: {e}")
+            print(f"Failed to send notification to {assigned_to}: {e}")
     elif not assigned_to:
         # Уведомляем всех членов семьи
         async with get_pool().acquire() as conn:
@@ -120,8 +123,13 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
                     member["user_id"],
                     f"{task_emoji} Новая {task_name} для всех:\n\n«{text}»\n\n👤 От: {creator_name}"
                 )
+                notification_sent = True
+                print(f"Notification sent to {member['user_id']}")
             except Exception as e:
                 print(f"Failed to send notification to {member['user_id']}: {e}")
+    
+    if not notification_sent and (assigned_to or not assigned_to):
+        print(f"Warning: No notifications were sent for task/shopping: {text}")
     
     await state.clear()
     await callback.message.delete()

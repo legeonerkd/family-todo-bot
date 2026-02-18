@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
 from states.user_states import UserState
 from keyboards.confirm import confirm_keyboard
 from db import get_family_id, get_pool, log_activity
@@ -7,12 +8,12 @@ from db import get_family_id, get_pool, log_activity
 router = Router()
 
 @router.message(F.text == "➕ Добавить")
-async def add_task(message: Message, state):
+async def add_task(message: Message, state: FSMContext):
     await state.set_state(UserState.confirm_type)
     await message.answer("Введите текст задачи или покупки:")
 
 @router.message(UserState.confirm_type)
-async def choose_type(message: Message, state):
+async def choose_type(message: Message, state: FSMContext):
     await state.update_data(text=message.text)
     await message.answer(
         f"Добавить:\n\n«{message.text}»",
@@ -20,7 +21,7 @@ async def choose_type(message: Message, state):
     )
 
 @router.callback_query(F.data.startswith("confirm:"))
-async def confirm_add(callback: CallbackQuery, state):
+async def confirm_add(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     text = data.get("text")
 
@@ -61,10 +62,11 @@ async def show_tasks(message: Message):
     text = "📋 Активные задачи:\n\n"
     buttons = []
     
-    for r in rows:
-        text += f"• {r['text']}\n"
+    for i, r in enumerate(rows, 1):
+        text += f"{i}. {r['text']}\n"
+        button_text = r['text'] if len(r['text']) <= 30 else r['text'][:27] + "..."
         buttons.append([InlineKeyboardButton(
-            text=f"✅ {r['text'][:30]}...",
+            text=f"✅ {button_text}",
             callback_data=f"task_done:{r['id']}"
         )])
     

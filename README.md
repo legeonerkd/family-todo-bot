@@ -32,6 +32,18 @@ cp .env.example .env
 
 ## Запуск
 
+### Локальное тестирование (polling)
+
+Для локального тестирования используйте режим polling:
+
+```bash
+python bot_polling.py
+```
+
+### Продакшн (webhook)
+
+Для продакшн-окружения с webhook:
+
 ```bash
 python bot.py
 ```

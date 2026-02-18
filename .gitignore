@@ -4,6 +4,9 @@ env/
 ENV/
 .venv/
 
+# Тестовые файлы (не для продакшн)
+bot_polling.py
+
 # Python
 __pycache__/
 *.py[cod]

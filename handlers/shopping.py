@@ -21,10 +21,11 @@ async def show_shopping(message: Message):
     text = "🛒 Список покупок:\n\n"
     buttons = []
     
-    for r in rows:
-        text += f"• {r['text']}\n"
+    for i, r in enumerate(rows, 1):
+        text += f"{i}. {r['text']}\n"
+        button_text = r['text'] if len(r['text']) <= 30 else r['text'][:27] + "..."
         buttons.append([InlineKeyboardButton(
-            text=f"✅ {r['text'][:30]}...",
+            text=f"✅ {button_text}",
             callback_data=f"shop_done:{r['id']}"
         )])
     

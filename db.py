@@ -123,6 +123,15 @@ async def is_parent(user_id: int) -> bool:
         return row and row['role'] == 'parent'
 
 
+async def log_activity(family_id: int, user_id: int, action: str):
+    """Записать действие в историю активности"""
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO activity_log (family_id, user_id, action) VALUES ($1, $2, $3)",
+            family_id, user_id, action
+        )
+
+
 async def close_db():
     """Закрыть пул соединений"""
     global _pool

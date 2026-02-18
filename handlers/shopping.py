@@ -6,16 +6,25 @@ router = Router()
 
 @router.message(F.text == "🛒 Покупки")
 async def show_shopping(message: Message):
-    family_id = await get_family_id(message.from_user.id)
-    
-    async with get_pool().acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, text FROM shopping WHERE family_id=$1 AND completed=false ORDER BY created_at",
-            family_id
-        )
-    
-    if not rows:
-        await message.answer("🛒 Список покупок пуст")
+    try:
+        family_id = await get_family_id(message.from_user.id)
+        
+        if not family_id:
+            await message.answer("❌ Ошибка: вы не состоите в семье")
+            return
+        
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, text FROM shopping WHERE family_id=$1 AND completed=false ORDER BY created_at",
+                family_id
+            )
+        
+        if not rows:
+            await message.answer("🛒 Список покупок пуст")
+            return
+    except Exception as e:
+        print(f"Error in show_shopping: {e}")
+        await message.answer(f"❌ Ошибка при загрузке покупок: {str(e)}")
         return
     
     text = "🛒 Список покупок:\n\n"

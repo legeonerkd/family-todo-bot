@@ -47,16 +47,25 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
 
 @router.message(F.text == "📋 Задачи")
 async def show_tasks(message: Message):
-    family_id = await get_family_id(message.from_user.id)
-    
-    async with get_pool().acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, text FROM tasks WHERE family_id=$1 AND completed=false ORDER BY created_at",
-            family_id
-        )
-    
-    if not rows:
-        await message.answer("📋 Нет активных задач")
+    try:
+        family_id = await get_family_id(message.from_user.id)
+        
+        if not family_id:
+            await message.answer("❌ Ошибка: вы не состоите в семье")
+            return
+        
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, text FROM tasks WHERE family_id=$1 AND completed=false ORDER BY created_at",
+                family_id
+            )
+        
+        if not rows:
+            await message.answer("📋 Нет активных задач")
+            return
+    except Exception as e:
+        print(f"Error in show_tasks: {e}")
+        await message.answer(f"❌ Ошибка при загрузке задач: {str(e)}")
         return
     
     text = "📋 Активные задачи:\n\n"

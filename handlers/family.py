@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from states.user_states import UserState
 from db import bot, get_family_id, get_pool, is_parent, log_activity
@@ -9,6 +9,7 @@ router = Router()
 @router.message(F.text == "👨‍👩‍👧‍👦 Семья")
 async def show_family(message: Message):
     family_id = await get_family_id(message.from_user.id)
+    parent = await is_parent(message.from_user.id)
 
     async with get_pool().acquire() as conn:
         family = await conn.fetchrow(
@@ -23,6 +24,8 @@ async def show_family(message: Message):
 
     family_name = family["name"] if family else "Моя семья"
     text = f"👨‍👩‍👧‍👦 {family_name}\n\nУчастники:\n\n"
+    
+    buttons = []
 
     for r in rows:
         try:
@@ -33,8 +36,51 @@ async def show_family(message: Message):
 
         role = "👑 Родитель" if r["role"] == "parent" else "👶 Ребёнок"
         text += f"{role} — {name}\n"
+        
+        # Добавляем кнопку изменения роли только для родителя
+        if parent and r["user_id"] != message.from_user.id:
+            new_role = "child" if r["role"] == "parent" else "parent"
+            role_emoji = "👶" if new_role == "child" else "👑"
+            buttons.append([InlineKeyboardButton(
+                text=f"{role_emoji} Изменить роль: {name}",
+                callback_data=f"change_role:{r['user_id']}:{new_role}"
+            )])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    await message.answer(text, reply_markup=keyboard)
 
-    await message.answer(text)
+@router.callback_query(F.data.startswith("change_role:"))
+async def change_role(callback: CallbackQuery):
+    if not await is_parent(callback.from_user.id):
+        await callback.answer("Только родитель может изменять роли", show_alert=True)
+        return
+    
+    parts = callback.data.split(":")
+    target_user_id = int(parts[1])
+    new_role = parts[2]
+    
+    family_id = await get_family_id(callback.from_user.id)
+    
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE family_members SET role=$1 WHERE user_id=$2 AND family_id=$3",
+            new_role, target_user_id, family_id
+        )
+    
+    try:
+        chat = await bot.get_chat(target_user_id)
+        name = chat.first_name
+    except:
+        name = str(target_user_id)
+    
+    role_name = "родителем" if new_role == "parent" else "ребёнком"
+    await log_activity(family_id, callback.from_user.id, f"Изменил роль {name} на {role_name}")
+    
+    await callback.message.delete()
+    await callback.answer(f"✅ Роль изменена на {role_name}")
+    
+    # Показываем обновлённый список
+    await show_family(callback.message)
 
 @router.message(F.text == "✏️ Название семьи")
 async def rename_family_start(message: Message, state: FSMContext):

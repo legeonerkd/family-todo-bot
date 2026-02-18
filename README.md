@@ -80,10 +80,18 @@ family_todo_bot/
 
 ## Деплой на Railway
 
+Подробная инструкция по настройке на Railway: [RAILWAY_SETUP.md](RAILWAY_SETUP.md)
+
+**Краткая инструкция:**
+
 1. Создайте новый проект на Railway
 2. Подключите PostgreSQL плагин
-3. Добавьте переменные окружения
-4. Деплойте приложение
+3. Добавьте переменные окружения:
+   - `BOT_TOKEN` - токен от @BotFather
+   - `DATABASE_URL` - автоматически из PostgreSQL
+   - `WEBHOOK_SECRET` - случайная строка
+   - `RAILWAY_STATIC_URL` - домен приложения (без https://)
+4. Railway автоматически задеплоит приложение
 
 ## Лицензия
 

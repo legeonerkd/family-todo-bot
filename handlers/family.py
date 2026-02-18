@@ -37,14 +37,20 @@ async def show_family(message: Message):
         role = "👑 Родитель" if r["role"] == "parent" else "👶 Ребёнок"
         text += f"{role} — {name}\n"
         
-        # Добавляем кнопку изменения роли только для родителя
+        # Добавляем кнопки управления только для родителя
         if parent and r["user_id"] != message.from_user.id:
             new_role = "child" if r["role"] == "parent" else "parent"
             role_emoji = "👶" if new_role == "child" else "👑"
-            buttons.append([InlineKeyboardButton(
-                text=f"{role_emoji} Изменить роль: {name}",
-                callback_data=f"change_role:{r['user_id']}:{new_role}"
-            )])
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"{role_emoji} Изменить роль: {name}",
+                    callback_data=f"change_role:{r['user_id']}:{new_role}"
+                ),
+                InlineKeyboardButton(
+                    text=f"❌ Удалить: {name}",
+                    callback_data=f"remove_member:{r['user_id']}"
+                )
+            ])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
     await message.answer(text, reply_markup=keyboard)
@@ -78,6 +84,46 @@ async def change_role(callback: CallbackQuery):
     
     await callback.message.delete()
     await callback.answer(f"✅ Роль изменена на {role_name}")
+    
+    # Показываем обновлённый список
+    await show_family(callback.message)
+
+@router.callback_query(F.data.startswith("remove_member:"))
+async def remove_member(callback: CallbackQuery):
+    if not await is_parent(callback.from_user.id):
+        await callback.answer("Только родитель может удалять участников", show_alert=True)
+        return
+    
+    target_user_id = int(callback.data.split(":")[1])
+    family_id = await get_family_id(callback.from_user.id)
+    
+    # Получаем имя удаляемого пользователя
+    try:
+        chat = await bot.get_chat(target_user_id)
+        name = chat.first_name
+    except:
+        name = str(target_user_id)
+    
+    # Удаляем пользователя из семьи
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "DELETE FROM family_members WHERE user_id=$1 AND family_id=$2",
+            target_user_id, family_id
+        )
+    
+    await log_activity(family_id, callback.from_user.id, f"Удалил из семьи: {name}")
+    
+    # Уведомляем удалённого пользователя
+    try:
+        await bot.send_message(
+            target_user_id,
+            f"❌ Вы были удалены из семьи.\n\nВы можете создать новую семью, нажав /start"
+        )
+    except Exception as e:
+        print(f"Failed to notify removed user {target_user_id}: {e}")
+    
+    await callback.message.delete()
+    await callback.answer(f"✅ {name} удалён из семьи")
     
     # Показываем обновлённый список
     await show_family(callback.message)

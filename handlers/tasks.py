@@ -72,6 +72,13 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
     
     family_id = await get_family_id(callback.from_user.id)
     
+    # Получаем имя создателя
+    try:
+        creator_chat = await bot.get_chat(callback.from_user.id)
+        creator_name = creator_chat.first_name
+    except:
+        creator_name = "Кто-то"
+    
     async with get_pool().acquire() as conn:
         if task_type == "task":
             await conn.execute(
@@ -79,12 +86,42 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
                 family_id, text, callback.from_user.id, assigned_to
             )
             await log_activity(family_id, callback.from_user.id, f"Добавил задачу: {text}")
+            task_emoji = "📋"
+            task_name = "задачу"
         else:
             await conn.execute(
                 "INSERT INTO shopping (family_id, text, created_by, assigned_to) VALUES ($1,$2,$3,$4)",
                 family_id, text, callback.from_user.id, assigned_to
             )
             await log_activity(family_id, callback.from_user.id, f"Добавил покупку: {text}")
+            task_emoji = "🛒"
+            task_name = "покупку"
+    
+    # Отправляем уведомление
+    if assigned_to and assigned_to != callback.from_user.id:
+        try:
+            await bot.send_message(
+                assigned_to,
+                f"{task_emoji} Вам назначена {task_name}:\n\n«{text}»\n\n👤 От: {creator_name}"
+            )
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+    elif not assigned_to:
+        # Уведомляем всех членов семьи
+        async with get_pool().acquire() as conn:
+            members = await conn.fetch(
+                "SELECT user_id FROM family_members WHERE family_id=$1 AND user_id!=$2",
+                family_id, callback.from_user.id
+            )
+        
+        for member in members:
+            try:
+                await bot.send_message(
+                    member["user_id"],
+                    f"{task_emoji} Новая {task_name} для всех:\n\n«{text}»\n\n👤 От: {creator_name}"
+                )
+            except Exception as e:
+                print(f"Failed to send notification to {member['user_id']}: {e}")
     
     await state.clear()
     await callback.message.delete()
@@ -145,18 +182,35 @@ async def mark_task_done(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
     family_id = await get_family_id(callback.from_user.id)
     
+    # Получаем имя выполнившего
+    try:
+        executor_chat = await bot.get_chat(callback.from_user.id)
+        executor_name = executor_chat.first_name
+    except:
+        executor_name = "Кто-то"
+    
     async with get_pool().acquire() as conn:
         task = await conn.fetchrow(
-            "SELECT text FROM tasks WHERE id=$1 AND family_id=$2",
+            "SELECT text, created_by FROM tasks WHERE id=$1 AND family_id=$2",
             task_id, family_id
         )
         
         if task:
             await conn.execute(
-                "UPDATE tasks SET completed=true WHERE id=$1",
+                "UPDATE tasks SET completed=true, completed_at=NOW() WHERE id=$1",
                 task_id
             )
             await log_activity(family_id, callback.from_user.id, f"Выполнил задачу: {task['text']}")
+            
+            # Уведомляем создателя о выполнении
+            if task['created_by'] and task['created_by'] != callback.from_user.id:
+                try:
+                    await bot.send_message(
+                        task['created_by'],
+                        f"✅ Задача выполнена!\n\n«{task['text']}»\n\n👤 Выполнил: {executor_name}"
+                    )
+                except Exception as e:
+                    print(f"Failed to send completion notification: {e}")
     
     await callback.message.delete()
     await callback.answer("Задача выполнена! ✅")

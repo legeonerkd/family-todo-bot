@@ -59,18 +59,35 @@ async def mark_shopping_done(callback: CallbackQuery):
     shop_id = int(callback.data.split(":")[1])
     family_id = await get_family_id(callback.from_user.id)
     
+    # Получаем имя выполнившего
+    try:
+        executor_chat = await bot.get_chat(callback.from_user.id)
+        executor_name = executor_chat.first_name
+    except:
+        executor_name = "Кто-то"
+    
     async with get_pool().acquire() as conn:
         shop = await conn.fetchrow(
-            "SELECT text FROM shopping WHERE id=$1 AND family_id=$2",
+            "SELECT text, created_by FROM shopping WHERE id=$1 AND family_id=$2",
             shop_id, family_id
         )
         
         if shop:
             await conn.execute(
-                "UPDATE shopping SET completed=true WHERE id=$1",
+                "UPDATE shopping SET completed=true, completed_at=NOW() WHERE id=$1",
                 shop_id
             )
             await log_activity(family_id, callback.from_user.id, f"Купил: {shop['text']}")
+            
+            # Уведомляем создателя о выполнении
+            if shop['created_by'] and shop['created_by'] != callback.from_user.id:
+                try:
+                    await bot.send_message(
+                        shop['created_by'],
+                        f"✅ Покупка выполнена!\n\n«{shop['text']}»\n\n👤 Купил: {executor_name}"
+                    )
+                except Exception as e:
+                    print(f"Failed to send completion notification: {e}")
     
     await callback.message.delete()
     await callback.answer("Покупка выполнена! ✅")

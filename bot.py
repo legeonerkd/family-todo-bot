@@ -3,6 +3,7 @@ from aiohttp import web
 from db import dp, bot, init_db, close_db
 from config import WEBHOOK_SECRET, RAILWAY_STATIC_URL
 from handlers import start, tasks, family, history, shopping
+from scheduler import schedule_daily_digest
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
@@ -18,6 +19,10 @@ async def on_startup():
     await bot.set_webhook(WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
     print("Database initialized")
     print("Webhook set")
+    
+    # Запускаем планировщик дайджестов
+    asyncio.create_task(schedule_daily_digest())
+    print("Daily digest scheduler started")
 
 async def on_shutdown():
     await bot.delete_webhook()

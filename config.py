@@ -1,10 +1,9 @@
 import os
+from dotenv import load_dotenv
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-DATABASE_URL = os.environ.get("DATABASE_URL")
+load_dotenv()
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN not set")
-
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL not set")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")

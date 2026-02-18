@@ -85,7 +85,7 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
                 "INSERT INTO tasks (family_id, text, created_by, assigned_to) VALUES ($1,$2,$3,$4)",
                 family_id, text, callback.from_user.id, assigned_to
             )
-            await log_activity(family_id, callback.from_user.id, f"Добавил задачу: {text}")
+            await log_activity(family_id, callback.from_user.id, f"Добавил задачу: {text}", 'task')
             task_emoji = "📋"
             task_name = "задачу"
         else:
@@ -93,7 +93,7 @@ async def assign_task(callback: CallbackQuery, state: FSMContext):
                 "INSERT INTO shopping (family_id, text, created_by, assigned_to) VALUES ($1,$2,$3,$4)",
                 family_id, text, callback.from_user.id, assigned_to
             )
-            await log_activity(family_id, callback.from_user.id, f"Добавил покупку: {text}")
+            await log_activity(family_id, callback.from_user.id, f"Добавил покупку: {text}", 'shopping')
             task_emoji = "🛒"
             task_name = "покупку"
     
@@ -208,7 +208,7 @@ async def mark_task_done(callback: CallbackQuery):
                 "UPDATE tasks SET completed=true, completed_at=NOW() WHERE id=$1",
                 task_id
             )
-            await log_activity(family_id, callback.from_user.id, f"Выполнил задачу: {task['text']}")
+            await log_activity(family_id, callback.from_user.id, f"Выполнил задачу: {task['text']}", 'task')
             
             # Уведомляем создателя о выполнении
             if task['created_by'] and task['created_by'] != callback.from_user.id:

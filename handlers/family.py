@@ -80,7 +80,7 @@ async def change_role(callback: CallbackQuery):
         name = str(target_user_id)
     
     role_name = "родителем" if new_role == "parent" else "ребёнком"
-    await log_activity(family_id, callback.from_user.id, f"Изменил роль {name} на {role_name}")
+    await log_activity(family_id, callback.from_user.id, f"Изменил роль {name} на {role_name}", 'role')
     
     await callback.message.delete()
     await callback.answer(f"✅ Роль изменена на {role_name}")
@@ -111,7 +111,7 @@ async def remove_member(callback: CallbackQuery):
             target_user_id, family_id
         )
     
-    await log_activity(family_id, callback.from_user.id, f"Удалил из семьи: {name}")
+    await log_activity(family_id, callback.from_user.id, f"Удалил из семьи: {name}", 'remove')
     
     # Уведомляем удалённого пользователя
     try:
@@ -148,7 +148,7 @@ async def rename_family_finish(message: Message, state: FSMContext):
             new_name, family_id
         )
     
-    await log_activity(family_id, message.from_user.id, f"Изменил название семьи на: {new_name}")
+    await log_activity(family_id, message.from_user.id, f"Изменил название семьи на: {new_name}", 'rename')
     await state.clear()
     await message.answer(f"✅ Название семьи изменено на: {new_name}")
 

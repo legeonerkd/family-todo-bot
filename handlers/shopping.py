@@ -77,7 +77,7 @@ async def mark_shopping_done(callback: CallbackQuery):
                 "UPDATE shopping SET completed=true, completed_at=NOW() WHERE id=$1",
                 shop_id
             )
-            await log_activity(family_id, callback.from_user.id, f"Купил: {shop['text']}")
+            await log_activity(family_id, callback.from_user.id, f"Купил: {shop['text']}", 'shopping')
             
             # Уведомляем создателя о выполнении
             if shop['created_by'] and shop['created_by'] != callback.from_user.id:

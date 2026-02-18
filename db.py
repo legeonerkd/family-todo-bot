@@ -93,6 +93,7 @@ async def init_db():
                 family_id INTEGER REFERENCES families(id) ON DELETE CASCADE,
                 user_id BIGINT NOT NULL,
                 action TEXT NOT NULL,
+                action_type TEXT DEFAULT 'other',
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -159,6 +160,12 @@ async def init_db():
             await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS created_by BIGINT")
         except:
             pass
+        
+        # Добавляем колонку action_type для фильтрации
+        try:
+            await conn.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS action_type TEXT DEFAULT 'other'")
+        except:
+            pass
 
 
 def get_pool():
@@ -212,12 +219,15 @@ async def is_parent(user_id: int) -> bool:
         return row and row['role'] == 'parent'
 
 
-async def log_activity(family_id: int, user_id: int, action: str):
-    """Записать действие в историю активности"""
+async def log_activity(family_id: int, user_id: int, action: str, action_type: str = 'other'):
+    """Записать действие в историю активности
+    
+    action_type может быть: 'task', 'shopping', 'role', 'remove', 'rename', 'join', 'other'
+    """
     async with _pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO activity_log (family_id, user_id, action) VALUES ($1, $2, $3)",
-            family_id, user_id, action
+            "INSERT INTO activity_log (family_id, user_id, action, action_type) VALUES ($1, $2, $3, $4)",
+            family_id, user_id, action, action_type
         )
 
 

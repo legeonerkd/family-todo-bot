@@ -43,7 +43,7 @@ async def start(message: Message):
                     family_id, message.from_user.id
                 )
             
-            await log_activity(family_id, message.from_user.id, "Присоединился к семье")
+            await log_activity(family_id, message.from_user.id, "Присоединился к семье", 'join')
             await message.answer(
                 f"✅ Вы присоединились к семье: {family['name']}",
                 reply_markup=main_menu(False)

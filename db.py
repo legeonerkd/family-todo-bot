@@ -44,7 +44,9 @@ async def init_db():
                 text TEXT NOT NULL,
                 completed BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT NOW(),
-                completed_at TIMESTAMP
+                completed_at TIMESTAMP,
+                assigned_to BIGINT,
+                created_by BIGINT
             )
         """)
         
@@ -56,7 +58,31 @@ async def init_db():
                 text TEXT NOT NULL,
                 completed BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT NOW(),
-                completed_at TIMESTAMP
+                completed_at TIMESTAMP,
+                assigned_to BIGINT,
+                created_by BIGINT
+            )
+        """)
+        
+        # Таблица чек-листов для задач
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS task_checklist (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                completed BOOLEAN DEFAULT FALSE,
+                position INTEGER DEFAULT 0
+            )
+        """)
+        
+        # Таблица чек-листов для покупок
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS shopping_checklist (
+                id SERIAL PRIMARY KEY,
+                shopping_id INTEGER REFERENCES shopping(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                completed BOOLEAN DEFAULT FALSE,
+                position INTEGER DEFAULT 0
             )
         """)
         
@@ -110,6 +136,27 @@ async def init_db():
         
         try:
             await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
+        except:
+            pass
+        
+        # Добавляем колонки для адресования задач
+        try:
+            await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to BIGINT")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by BIGINT")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS assigned_to BIGINT")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS created_by BIGINT")
         except:
             pass
 

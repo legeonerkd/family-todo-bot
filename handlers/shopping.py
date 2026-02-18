@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from db import get_family_id, get_pool, log_activity
+from db import get_family_id, get_pool, log_activity, bot
 
 router = Router()
 
@@ -15,7 +15,7 @@ async def show_shopping(message: Message):
         
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, text FROM shopping WHERE family_id=$1 AND completed=false ORDER BY created_at",
+                "SELECT id, text, assigned_to FROM shopping WHERE family_id=$1 AND completed=false ORDER BY created_at",
                 family_id
             )
         
@@ -31,8 +31,21 @@ async def show_shopping(message: Message):
     buttons = []
     
     for i, r in enumerate(rows, 1):
-        text += f"{i}. {r['text']}\n"
-        button_text = r['text'] if len(r['text']) <= 30 else r['text'][:27] + "..."
+        shop_text = r['text']
+        
+        # Добавляем информацию об исполнителе
+        if r['assigned_to']:
+            try:
+                chat = await bot.get_chat(r['assigned_to'])
+                assignee = chat.first_name
+                shop_text += f" (👤 {assignee})"
+            except:
+                pass
+        else:
+            shop_text += " (🌐 Всем)"
+        
+        text += f"{i}. {shop_text}\n"
+        button_text = r['text'] if len(r['text']) <= 25 else r['text'][:22] + "..."
         buttons.append([InlineKeyboardButton(
             text=f"✅ {button_text}",
             callback_data=f"shop_done:{r['id']}"

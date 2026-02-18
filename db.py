@@ -96,6 +96,22 @@ async def init_db():
             await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP")
         except:
             pass
+        
+        # Добавляем created_at если отсутствует
+        try:
+            await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
+        except:
+            pass
 
 
 def get_pool():

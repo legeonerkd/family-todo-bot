@@ -70,6 +70,32 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        
+        # Миграция: добавляем недостающие колонки в существующие таблицы
+        try:
+            await conn.execute("ALTER TABLE families ADD COLUMN IF NOT EXISTS name TEXT DEFAULT 'Моя семья'")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT FALSE")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT FALSE")
+        except:
+            pass
+        
+        try:
+            await conn.execute("ALTER TABLE shopping ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP")
+        except:
+            pass
 
 
 def get_pool():

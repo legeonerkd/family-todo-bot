@@ -4,10 +4,6 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 def main_menu(is_parent: bool):
     rows = [
         [
-            KeyboardButton(text="➕ Задача"),
-            KeyboardButton(text="➕ Покупка")
-        ],
-        [
             KeyboardButton(text="📋 Задачи"),
             KeyboardButton(text="🛒 Покупки")
         ],

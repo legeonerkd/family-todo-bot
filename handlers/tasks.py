@@ -2,89 +2,25 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from states.user_states import UserState
-from keyboards.confirm import confirm_keyboard
 from db import get_family_id, get_pool, log_activity, bot
 
 router = Router()
 
-@router.message(F.text == "➕ Задача")
-async def add_task_direct(message: Message, state: FSMContext):
-    """Прямое добавление задачи"""
-    await state.set_state(UserState.confirm_type)
-    await state.update_data(force_type="task")
-    await message.answer("Введите текст задачи:")
-
-@router.message(F.text == "➕ Покупка")
-async def add_shopping_direct(message: Message, state: FSMContext):
-    """Прямое добавление покупки"""
-    await state.set_state(UserState.confirm_type)
-    await state.update_data(force_type="shopping")
-    await message.answer("Введите название покупки:")
-
-@router.message(F.text == "➕ Добавить")
-async def add_task(message: Message, state: FSMContext):
-    """Старый обработчик для обратной совместимости"""
-    await state.set_state(UserState.confirm_type)
-    await message.answer("Введите текст задачи или покупки:")
-
 @router.message(UserState.confirm_type)
 async def choose_type(message: Message, state: FSMContext):
+    """Обработчик ввода текста задачи/покупки после нажатия кнопки добавления"""
     data = await state.get_data()
     force_type = data.get("force_type")
     
+    if not force_type:
+        await message.answer("❌ Ошибка: тип не определен. Используйте кнопки из списка задач или покупок.")
+        await state.clear()
+        return
+    
     await state.update_data(text=message.text)
     
-    # Если тип принудительно задан (например, из кнопки "Добавить покупку")
-    if force_type:
-        # Сразу переходим к выбору исполнителя
-        family_id = await get_family_id(message.from_user.id)
-        
-        async with get_pool().acquire() as conn:
-            members = await conn.fetch(
-                "SELECT user_id FROM family_members WHERE family_id=$1",
-                family_id
-            )
-        
-        buttons = []
-        for member in members:
-            try:
-                chat = await bot.get_chat(member["user_id"])
-                name = chat.first_name
-            except:
-                name = str(member["user_id"])
-            
-            buttons.append([InlineKeyboardButton(
-                text=f"👤 {name}",
-                callback_data=f"assign:{force_type}:{member['user_id']}"
-            )])
-        
-        buttons.append([InlineKeyboardButton(
-            text="🌐 Всем",
-            callback_data=f"assign:{force_type}:all"
-        )])
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await message.answer(
-            f"Кому назначить?\n\n«{message.text}»",
-            reply_markup=keyboard
-        )
-    else:
-        # Обычный режим - спрашиваем тип
-        await message.answer(
-            f"Добавить:\n\n«{message.text}»",
-            reply_markup=confirm_keyboard()
-        )
-
-@router.callback_query(F.data.startswith("confirm:"))
-async def confirm_add(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    text = data.get("text")
-    task_type = callback.data.split(":")[1]
-    
-    await state.update_data(task_type=task_type)
-    
     # Показываем список членов семьи для выбора исполнителя
-    family_id = await get_family_id(callback.from_user.id)
+    family_id = await get_family_id(message.from_user.id)
     
     async with get_pool().acquire() as conn:
         members = await conn.fetch(
@@ -102,17 +38,17 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
         
         buttons.append([InlineKeyboardButton(
             text=f"👤 {name}",
-            callback_data=f"assign:{task_type}:{member['user_id']}"
+            callback_data=f"assign:{force_type}:{member['user_id']}"
         )])
     
     buttons.append([InlineKeyboardButton(
         text="🌐 Всем",
-        callback_data=f"assign:{task_type}:all"
+        callback_data=f"assign:{force_type}:all"
     )])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(
-        f"Кому назначить?\n\n«{text}»",
+    await message.answer(
+        f"Кому назначить?\n\n«{message.text}»",
         reply_markup=keyboard
     )
 

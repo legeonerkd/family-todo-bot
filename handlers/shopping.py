@@ -1,5 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from states.user_states import UserState
 from db import get_family_id, get_pool, log_activity, bot
 
 router = Router()
@@ -20,7 +22,11 @@ async def show_shopping(message: Message):
             )
         
         if not rows:
-            await message.answer("🛒 Список покупок пуст")
+            # Если список пуст, показываем кнопку для добавления
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить покупку", callback_data="add_shopping")]
+            ])
+            await message.answer("🛒 Список покупок пуст", reply_markup=keyboard)
             return
     except Exception as e:
         print(f"Error in show_shopping: {e}")
@@ -51,8 +57,22 @@ async def show_shopping(message: Message):
             callback_data=f"shop_done:{r['id']}"
         )])
     
+    # Добавляем кнопку "Добавить покупку" в конец списка
+    buttons.append([InlineKeyboardButton(
+        text="➕ Добавить покупку",
+        callback_data="add_shopping"
+    )])
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, reply_markup=keyboard)
+
+@router.callback_query(F.data == "add_shopping")
+async def add_shopping_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработчик для кнопки 'Добавить покупку'"""
+    await state.set_state(UserState.confirm_type)
+    await state.update_data(force_type="shopping")
+    await callback.message.answer("Введите название покупки:")
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("shop_done:"))
 async def mark_shopping_done(callback: CallbackQuery):

@@ -25,10 +25,10 @@ cp .env.example .env
 ```
 
 4. Заполните переменные окружения в `.env`:
-   - `BOT_TOKEN` - токен бота от @BotFather
-   - `DATABASE_URL` - URL базы данных PostgreSQL
-   - `WEBHOOK_SECRET` - секретный токен для webhook
-   - `RAILWAY_STATIC_URL` - URL вашего приложения
+   - `BOT_TOKEN` - 7918573197:AAEurp4Sl5NVAyNU6FHiYOYY-7lfJp4bmJc
+   - `DATABASE_URL` - postgresql://postgres:TamzdUQrFxFobWyNWRdJOmwbWcCDYbPb@postgres.railway.internal:5432/railway
+   - `WEBHOOK_SECRET` - s8df98sdf98sdf98
+   - `RAILWAY_STATIC_URL` - family-todo-bot-production.up.railway.app
 
 ## Запуск
 

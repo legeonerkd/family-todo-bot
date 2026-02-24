@@ -7,8 +7,23 @@ from db import get_family_id, get_pool, log_activity, bot
 
 router = Router()
 
+@router.message(F.text == "➕ Задача")
+async def add_task_direct(message: Message, state: FSMContext):
+    """Прямое добавление задачи"""
+    await state.set_state(UserState.confirm_type)
+    await state.update_data(force_type="task")
+    await message.answer("Введите текст задачи:")
+
+@router.message(F.text == "➕ Покупка")
+async def add_shopping_direct(message: Message, state: FSMContext):
+    """Прямое добавление покупки"""
+    await state.set_state(UserState.confirm_type)
+    await state.update_data(force_type="shopping")
+    await message.answer("Введите название покупки:")
+
 @router.message(F.text == "➕ Добавить")
 async def add_task(message: Message, state: FSMContext):
+    """Старый обработчик для обратной совместимости"""
     await state.set_state(UserState.confirm_type)
     await message.answer("Введите текст задачи или покупки:")
 
@@ -191,7 +206,11 @@ async def show_tasks(message: Message):
             )
         
         if not rows:
-            await message.answer("📋 Нет активных задач")
+            # Если список пуст, показываем кнопку для добавления
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить задачу", callback_data="add_task")]
+            ])
+            await message.answer("📋 Нет активных задач", reply_markup=keyboard)
             return
     except Exception as e:
         print(f"Error in show_tasks: {e}")
@@ -221,6 +240,12 @@ async def show_tasks(message: Message):
             text=f"✅ {button_text}",
             callback_data=f"task_done:{r['id']}"
         )])
+    
+    # Добавляем кнопку "Добавить задачу" в конец списка
+    buttons.append([InlineKeyboardButton(
+        text="➕ Добавить задачу",
+        callback_data="add_task"
+    )])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, reply_markup=keyboard)
@@ -262,3 +287,11 @@ async def mark_task_done(callback: CallbackQuery):
     
     await callback.message.delete()
     await callback.answer("Задача выполнена! ✅")
+
+@router.callback_query(F.data == "add_task")
+async def add_task_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработчик для кнопки 'Добавить задачу'"""
+    await state.set_state(UserState.confirm_type)
+    await state.update_data(force_type="task")
+    await callback.message.answer("Введите текст задачи:")
+    await callback.answer()

@@ -221,6 +221,10 @@ async def show_tasks(message: Message):
     buttons = []
     
     for i, r in enumerate(rows, 1):
+        # Проверяем, что текст не None
+        if not r['text']:
+            continue
+            
         task_text = r['text']
         
         # Добавляем информацию об исполнителе

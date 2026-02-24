@@ -37,6 +37,10 @@ async def show_shopping(message: Message):
     buttons = []
     
     for i, r in enumerate(rows, 1):
+        # Проверяем, что текст не None
+        if not r['text']:
+            continue
+            
         shop_text = r['text']
         
         # Добавляем информацию об исполнителе

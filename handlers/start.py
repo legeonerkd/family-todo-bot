@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from db import bot, ensure_family, is_parent, get_pool, log_activity
-from keyboards.main_meny import main_menu
+from keyboards.main_menu import main_menu
 
 router = Router()
 
